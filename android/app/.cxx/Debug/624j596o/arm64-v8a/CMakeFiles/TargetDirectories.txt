@@ -1,0 +1,2 @@
+C:/Users/ravim/Downloads/harvesthub-master/android/app/.cxx/Debug/624j596o/arm64-v8a/CMakeFiles/edit_cache.dir
+C:/Users/ravim/Downloads/harvesthub-master/android/app/.cxx/Debug/624j596o/arm64-v8a/CMakeFiles/rebuild_cache.dir

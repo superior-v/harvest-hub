@@ -1,0 +1,77 @@
+name: harvest
+description: "A new Flutter project."
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.6.1
+
+dependencies:
+  path: ^1.8.3
+  flutter:
+    sdk: flutter
+
+
+
+  # Firebase
+  firebase_core: ^2.24.2
+  firebase_auth: ^4.15.3
+  cloud_firestore: ^4.13.6
+  firebase_storage: ^11.5.6
+  firebase_messaging: ^14.7.10
+
+  permission_handler: ^11.2.0
+  # State Management & Utilities
+
+  uuid: ^4.3.3
+
+
+  # State Management
+  provider: ^6.1.1
+
+  # Navigation
+  go_router: ^13.0.0
+
+  # UI Components
+  cached_network_image: ^3.3.1
+  flutter_staggered_grid_view: ^0.7.0
+  shimmer: ^3.0.0
+  google_fonts: ^6.2.1
+
+  # Maps & Location
+  google_maps_flutter: ^2.5.0
+  geolocator: ^11.0.0
+  geocoding: ^2.1.1
+
+  # Image Handling
+  image_picker: ^1.0.7
+  photo_view: ^0.14.0
+
+  # Charts
+  fl_chart: ^0.66.0
+
+  # Utils
+  intl: ^0.19.0
+  timeago: ^3.6.0
+  share_plus: ^7.2.2
+  url_launcher: ^6.2.4
+
+  # Icons
+  cupertino_icons: ^1.0.8
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+dependency_overrides:
+  firebase_auth_platform_interface: 7.0.9
+
+flutter:
+  uses-material-design: true
+
+  # Uncomment and add assets when needed
+  # assets:
+  #   - assets/images/
+  #   - assets/icons/

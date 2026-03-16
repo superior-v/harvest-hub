@@ -1,0 +1,2 @@
+C:/Users/ravim/Downloads/harvesthub-master/android/app/.cxx/RelWithDebInfo/6q3i5q1n/armeabi-v7a/CMakeFiles/edit_cache.dir
+C:/Users/ravim/Downloads/harvesthub-master/android/app/.cxx/RelWithDebInfo/6q3i5q1n/armeabi-v7a/CMakeFiles/rebuild_cache.dir
