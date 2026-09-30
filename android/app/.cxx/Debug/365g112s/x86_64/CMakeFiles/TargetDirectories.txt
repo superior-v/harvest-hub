@@ -1,0 +1,2 @@
+C:/Users/ravim/OneDrive/Documents/harvest-hub/android/app/.cxx/Debug/365g112s/x86_64/CMakeFiles/edit_cache.dir
+C:/Users/ravim/OneDrive/Documents/harvest-hub/android/app/.cxx/Debug/365g112s/x86_64/CMakeFiles/rebuild_cache.dir

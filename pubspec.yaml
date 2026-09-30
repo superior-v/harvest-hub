@@ -59,6 +59,7 @@ dependencies:
 
   # Icons
   cupertino_icons: ^1.0.8
+  shared_preferences: ^2.5.3
 
 dev_dependencies:
   flutter_test:
@@ -71,7 +72,6 @@ dependency_overrides:
 flutter:
   uses-material-design: true
 
-  # Uncomment and add assets when needed
-  # assets:
-  #   - assets/images/
-  #   - assets/icons/
+  assets:
+    - assets/images/
+    - assets/icons/

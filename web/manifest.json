@@ -1,11 +1,11 @@
 {
-    "name": "harvest",
-    "short_name": "harvest",
+    "name": "HarvestHub",
+    "short_name": "HarvestHub",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#FAF6F0",
+    "theme_color": "#2F7D4D",
+    "description": "HarvestHub - Connecting Donors, Farmers, and Communities.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

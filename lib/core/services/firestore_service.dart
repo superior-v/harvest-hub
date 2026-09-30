@@ -118,6 +118,11 @@ class FirestoreService {
     DateTime? expiryDate,
     String? donorName,
     String? donorPhone,
+    // ── Food Safety ────────────────────────────────────────────
+    DateTime? cookedAt,
+    DateTime? pickupDeadline,
+    List<String> dietaryTags = const [],
+    List<String> allergenTags = const [],
   }) async {
     try {
       debugPrint('🔵 Creating donation: $title');
@@ -142,6 +147,11 @@ class FirestoreService {
         'views': 0,
         'requestCount': 0,
         'isActive': true,
+        // Food safety
+        'cookedAt': cookedAt != null ? Timestamp.fromDate(cookedAt) : null,
+        'pickupDeadline': pickupDeadline != null ? Timestamp.fromDate(pickupDeadline) : null,
+        'dietaryTags': dietaryTags,
+        'allergenTags': allergenTags,
       });
 
       // Increment donor's total donations
@@ -330,11 +340,15 @@ class FirestoreService {
       final donationData = donationDoc.data() as Map<String, dynamic>?;
       final donorId = donationData?['donorId'] as String? ?? '';
 
-      String donorName = '';
-      if (donorId.isNotEmpty) {
-        final donorDoc = await users.doc(donorId).get();
-        final donorData = donorDoc.data() as Map<String, dynamic>?;
-        donorName = donorData?['name'] as String? ?? '';
+      String donorName = donationData?['donorName'] as String? ?? '';
+      if (donorName.isEmpty && donorId.isNotEmpty) {
+        try {
+          final donorDoc = await users.doc(donorId).get();
+          final donorData = donorDoc.data() as Map<String, dynamic>?;
+          donorName = donorData?['name'] as String? ?? '';
+        } catch (e) {
+          debugPrint('⚠️ Could not read donor user doc (permission or missing): $e');
+        }
       }
 
       final docRef = await requests.add({
@@ -354,14 +368,22 @@ class FirestoreService {
         'isActive': true,
       });
 
-      // Increment request count on donation
-      await donations.doc(donationId).update({
-        'requestCount': FieldValue.increment(1),
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
+      // Increment request count on donation (safely wrapped)
+      try {
+        await donations.doc(donationId).update({
+          'requestCount': FieldValue.increment(1),
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+      } catch (e) {
+        debugPrint('⚠️ Could not increment donation requestCount (permission rules): $e');
+      }
 
-      // Increment user's total requests
-      await incrementUserStats(recipientId, 'totalRequests');
+      // Increment user's total requests (safely wrapped)
+      try {
+        await incrementUserStats(recipientId, 'totalRequests');
+      } catch (e) {
+        debugPrint('⚠️ Could not increment user stats: $e');
+      }
 
       debugPrint('✅ Request created with ID: ${docRef.id}');
       return docRef.id;

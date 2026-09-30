@@ -770,12 +770,29 @@ class _ProfileScreenState extends State<ProfileScreen> {
       context: context,
       builder: (context) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Row(
+        title: Row(
           children: [
-            Icon(Icons.info, color: AppColors.primaryGreen),
-            Icon(Icons.info, color: _leaf),
-            SizedBox(width: 12),
-            Text('About HarvestHub'),
+            Container(
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: Image.asset(
+                  'assets/images/app_logo.png',
+                  fit: BoxFit.cover,
+                  errorBuilder: (context, error, stackTrace) => const Icon(
+                    Icons.eco,
+                    color: _leaf,
+                    size: 28,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            const Text('About HarvestHub'),
           ],
         ),
         content: const Column(

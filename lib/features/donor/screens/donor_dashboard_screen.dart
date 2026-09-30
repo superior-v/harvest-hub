@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:harvest/core/constants/app_constants.dart';
+import 'package:harvest/features/chat/screens/chat_list_screen.dart';
 
 class DonorDashboardScreen extends StatefulWidget {
   const DonorDashboardScreen({Key? key}) : super(key: key);
@@ -353,7 +354,32 @@ class _DonorDashboardScreenState extends State<DonorDashboardScreen> with Ticker
                               ],
                             ),
                           ),
-                          const SizedBox(width: 10),
+                          const SizedBox(width: 8),
+                          // Messages button
+                          GestureDetector(
+                            onTap: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(builder: (_) => const ChatListScreen()),
+                            ),
+                            child: Container(
+                              width: 38,
+                              height: 38,
+                              decoration: BoxDecoration(
+                                color: Colors.white.withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(11),
+                                border: Border.all(
+                                  color: Colors.white.withOpacity(0.15),
+                                  width: 0.5,
+                                ),
+                              ),
+                              child: const Icon(
+                                Icons.chat_bubble_outline_rounded,
+                                color: Colors.white,
+                                size: 18,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
                           // Avatar
                           GestureDetector(
                             onTap: () => Navigator.pushNamed(context, '/profile'),

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:harvest/core/constants/app_constants.dart';
 import 'package:harvest/core/services/auth_service.dart';
 import 'package:harvest/core/services/firestore_service.dart';
+import 'package:harvest/core/services/user_preferences_service.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -104,18 +105,35 @@ class _LoginScreenState extends State<LoginScreen> {
                           Row(
                             children: [
                               Container(
-                                padding: const EdgeInsets.all(12),
+                                width: 46,
+                                height: 46,
                                 decoration: BoxDecoration(
-                                  color: AppColors.primaryGreen.withOpacity(0.14),
-                                  borderRadius: BorderRadius.circular(14),
+                                  borderRadius: BorderRadius.circular(12),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: AppColors.primaryGreen.withOpacity(0.2),
+                                      blurRadius: 8,
+                                      offset: const Offset(0, 3),
+                                    ),
+                                  ],
                                 ),
-                                child: const Icon(
-                                  Icons.eco_rounded,
-                                  color: AppColors.deepGreen,
-                                  size: 28,
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(12),
+                                  child: Image.asset(
+                                    'assets/images/app_logo.png',
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (context, error, stackTrace) => Container(
+                                      color: AppColors.primaryGreen.withOpacity(0.14),
+                                      child: const Icon(
+                                        Icons.eco_rounded,
+                                        color: AppColors.deepGreen,
+                                        size: 26,
+                                      ),
+                                    ),
+                                  ),
                                 ),
                               ),
-                              const SizedBox(width: 12),
+                              const SizedBox(width: 14),
                               const Expanded(
                                 child: Text(
                                   'HarvestHub',
@@ -391,27 +409,42 @@ class _LoginScreenState extends State<LoginScreen> {
         );
 
         if (credential?.user != null) {
-          try {
-            final userDoc = await FirebaseFirestore.instance.collection('users').doc(credential!.user!.uid).get();
+          final user = credential!.user!;
+          String? userRole;
 
-            if (!userDoc.exists) {
+          try {
+            final userDoc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+
+            if (userDoc.exists) {
+              final data = userDoc.data();
+              userRole = data?['role'] as String?;
+            } else {
               // Older accounts can exist in Auth without a profile doc.
               // Auto-create a minimal profile to unblock login.
               await _firestoreService.createUserProfile(
-                uid: credential.user!.uid,
-                email: credential.user!.email ?? _emailController.text.trim(),
-                name: credential.user!.displayName ?? 'User',
+                uid: user.uid,
+                email: user.email ?? _emailController.text.trim(),
+                name: user.displayName ?? 'User',
                 role: 'recipient',
               );
-            }
-
-            if (mounted) {
-              // Always ask role after login.
-              Navigator.pushReplacementNamed(context, '/role-selection');
+              userRole = 'recipient';
             }
           } catch (e) {
             debugPrint('Error fetching user role: $e');
-            if (mounted) {
+          }
+
+          // Cache session and role locally
+          await UserPreferencesService.saveUserSession(
+            uid: user.uid,
+            email: user.email ?? _emailController.text.trim(),
+            name: user.displayName,
+            role: userRole,
+          );
+
+          if (mounted) {
+            if (userRole != null && userRole.isNotEmpty) {
+              _navigateToRoleDashboard(userRole);
+            } else {
               Navigator.pushReplacementNamed(context, '/role-selection');
             }
           }
@@ -425,7 +458,7 @@ class _LoginScreenState extends State<LoginScreen> {
         );
 
         if (user != null) {
-          // Create user profile
+          // Create user profile in Firestore
           try {
             await _firestoreService.createUserProfile(
               uid: user.uid,
@@ -436,6 +469,14 @@ class _LoginScreenState extends State<LoginScreen> {
           } catch (e) {
             debugPrint('Error creating user profile: $e');
           }
+
+          // Cache session and selected role locally
+          await UserPreferencesService.saveUserSession(
+            uid: user.uid,
+            email: _emailController.text.trim(),
+            name: _nameController.text.trim(),
+            role: _selectedRole,
+          );
 
           if (mounted) {
             _navigateToRoleDashboard(_selectedRole);

@@ -2,6 +2,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'dart:convert';
 import 'dart:io';
 
@@ -158,4 +159,46 @@ class MapService {
   double calculateDistance(double lat1, double lon1, double lat2, double lon2) {
     return Geolocator.distanceBetween(lat1, lon1, lat2, lon2) / 1000;
   }
-}
+
+  // ── Navigation helpers ─────────────────────────────────────────────────────
+
+  /// Opens Google Maps navigation to [destLat], [destLng].
+  /// Falls back to the web URL if the app is not installed.
+  Future<void> launchGoogleMaps(double destLat, double destLng, {String? label}) async {
+    final encodedLabel = Uri.encodeComponent(label ?? 'Pickup Location');
+    // Try native app intent first (works on both Android & iOS)
+    final appUri = Uri.parse('google.navigation:q=$destLat,$destLng&mode=d');
+    final webUri = Uri.parse('https://www.google.com/maps/dir/?api=1&destination=$destLat,$destLng&travelmode=driving');
+
+    if (await canLaunchUrl(appUri)) {
+      await launchUrl(appUri);
+    } else if (await canLaunchUrl(webUri)) {
+      await launchUrl(webUri, mode: LaunchMode.externalApplication);
+    } else {
+      debugPrint('❌ Could not launch Google Maps');
+    }
+  }
+
+  /// Opens Apple Maps navigation (iOS only). Falls back to Google Maps web on Android.
+  Future<void> launchAppleMaps(double destLat, double destLng, {String? label}) async {
+    final encodedLabel = Uri.encodeComponent(label ?? 'Pickup Location');
+    final appleUri = Uri.parse('maps://maps.apple.com/?daddr=$destLat,$destLng&dirflg=d');
+    final webUri = Uri.parse('https://maps.apple.com/?daddr=$destLat,$destLng');
+
+    if (await canLaunchUrl(appleUri)) {
+      await launchUrl(appleUri);
+    } else {
+      // Fallback to Google Maps on non-iOS
+      await launchGoogleMaps(destLat, destLng, label: label);
+    }
+  }
+
+  /// Platform-aware: opens Google Maps on Android, Apple Maps on iOS.
+  Future<void> openNavigationToCoords(double lat, double lng, {String? label}) async {
+    if (Platform.isIOS) {
+      await launchAppleMaps(lat, lng, label: label);
+    } else {
+      await launchGoogleMaps(lat, lng, label: label);
+    }
+  }
+}

@@ -3,6 +3,11 @@ import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:harvest/core/constants/app_constants.dart';
 import 'package:harvest/core/services/firestore_service.dart';
+import 'package:harvest/core/services/map_service.dart';
+import 'package:harvest/core/services/chat_service.dart';
+import 'package:harvest/features/chat/screens/chat_screen.dart';
+import 'package:harvest/features/chat/screens/chat_list_screen.dart';
+import 'package:harvest/core/widgets/food_safety_widgets.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 class RecipientDashboardScreen extends StatefulWidget {
@@ -16,9 +21,19 @@ class _RecipientDashboardScreenState extends State<RecipientDashboardScreen> wit
   int _selectedIndex = 0;
   String _selectedCategory = 'All';
   final FirestoreService _firestoreService = FirestoreService();
+  final MapService _mapService = MapService();
+  final ChatService _chatService = ChatService();
 
   AnimationController? _fadeController;
   Animation<double> _fadeAnimation = const AlwaysStoppedAnimation<double>(1.0);
+
+  // ── Geo-radius state ───────────────────────────────────────────────────
+  double? _userLat;
+  double? _userLng;
+  bool _isLocating = false;
+  /// Active radius in km. null = 'Any Distance' (no filter).
+  double? _selectedRadius;
+  static const List<double> _radiusOptions = [1, 5, 10, 25];
 
   List<String> _categories = [
     'All',
@@ -98,6 +113,49 @@ class _RecipientDashboardScreenState extends State<RecipientDashboardScreen> wit
     super.initState();
     _initAnimationsIfNeeded();
     _checkUserRole();
+    _autoFetchLocation();
+  }
+
+  /// Silently try to get location on startup. No error dialogs — just
+  /// enables radius filtering if permission is already granted.
+  Future<void> _autoFetchLocation() async {
+    try {
+      final pos = await _mapService.getCurrentLocation();
+      if (pos != null && mounted) {
+        setState(() {
+          _userLat = pos.latitude;
+          _userLng = pos.longitude;
+        });
+      }
+    } catch (_) {}
+  }
+
+  /// Explicitly fetch location (called from the radius bar).
+  Future<void> _fetchUserLocation() async {
+    setState(() => _isLocating = true);
+    try {
+      final granted = await _mapService.requestLocationPermission();
+      if (!granted) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Location permission required for radius filtering'),
+              backgroundColor: Color(0xFFD32F2F),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+        return;
+      }
+      final pos = await _mapService.getCurrentLocation();
+      if (pos != null && mounted) {
+        setState(() {
+          _userLat = pos.latitude;
+          _userLng = pos.longitude;
+        });
+      }
+    } catch (_) {}
+    if (mounted) setState(() => _isLocating = false);
   }
 
   Future<void> _checkUserRole() async {
@@ -162,6 +220,7 @@ class _RecipientDashboardScreenState extends State<RecipientDashboardScreen> wit
           children: [
             _buildHeader(),
             _buildCategoryChips(),
+            _buildRadiusFilterBar(),
             Expanded(
               child: _selectedIndex == 0 ? _buildBrowseTab() : const Center(child: Text('Requests tab')),
             ),
@@ -257,6 +316,32 @@ class _RecipientDashboardScreenState extends State<RecipientDashboardScreen> wit
                           ],
                         ),
                       ],
+                    ),
+                  ),
+                  // Messages button
+                  GestureDetector(
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => const ChatListScreen()),
+                      );
+                    },
+                    child: Container(
+                      width: 40,
+                      height: 40,
+                      margin: const EdgeInsets.only(right: 10),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.12),
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white.withValues(alpha: 0.25)),
+                      ),
+                      child: const Center(
+                        child: Icon(
+                          Icons.chat_bubble_outline_rounded,
+                          color: Colors.white,
+                          size: 19,
+                        ),
+                      ),
                     ),
                   ),
                   // Avatar + profile
@@ -361,6 +446,71 @@ class _RecipientDashboardScreenState extends State<RecipientDashboardScreen> wit
     );
   }
 
+  // ─── RADIUS FILTER BAR ────────────────────────────────────────────────────
+
+  Widget _buildRadiusFilterBar() {
+    return Container(
+      height: 46,
+      color: _cardBg,
+      child: Row(
+        children: [
+          // Location pin icon / locating spinner
+          Padding(
+            padding: const EdgeInsets.only(left: 12, right: 4),
+            child: _isLocating
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(_wave),
+                    ),
+                  )
+                : GestureDetector(
+                    onTap: _fetchUserLocation,
+                    child: Icon(
+                      _userLat != null
+                          ? Icons.my_location_rounded
+                          : Icons.location_searching_rounded,
+                      size: 18,
+                      color: _userLat != null ? _wave : _slate,
+                    ),
+                  ),
+          ),
+          // Radius option chips
+          Expanded(
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 7),
+              children: [
+                // 'Any' chip
+                Padding(
+                  padding: const EdgeInsets.only(right: 6),
+                  child: _RadiusChip(
+                    label: 'Any',
+                    isSelected: _selectedRadius == null,
+                    onTap: () => setState(() => _selectedRadius = null),
+                  ),
+                ),
+                ..._radiusOptions.map((r) => Padding(
+                  padding: const EdgeInsets.only(right: 6),
+                  child: _RadiusChip(
+                    label: '${r.toInt()} km',
+                    isSelected: _selectedRadius == r,
+                    isDisabled: _userLat == null,
+                    onTap: _userLat != null
+                        ? () => setState(() => _selectedRadius = r)
+                        : _fetchUserLocation,
+                  ),
+                )),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   // ─── BROWSE TAB ───────────────────────────────────────────────────────────
 
   Widget _buildBrowseTab() {
@@ -385,12 +535,12 @@ class _RecipientDashboardScreenState extends State<RecipientDashboardScreen> wit
           return _buildEmptyState();
         }
 
-        // Local filtering
+        // Local filtering (category + role + radius)
         final allDocs = snapshot.data!.docs;
         final filteredDonations = allDocs.where((doc) {
           final data = doc.data() as Map<String, dynamic>;
           if (data['status'] != 'available') return false;
-          
+
           final docCategory = data['category'] as String? ?? 'Other';
           final farmerCategories = ['Organic Waste', 'Manure', 'Seeds'];
 
@@ -404,8 +554,38 @@ class _RecipientDashboardScreenState extends State<RecipientDashboardScreen> wit
               if (farmerCategories.contains(docCategory)) return false;
             }
           }
+
+          // Radius filter: only apply when a radius is selected AND we have user location
+          if (_selectedRadius != null && _userLat != null && _userLng != null) {
+            final donLat = (data['latitude'] as num?)?.toDouble();
+            final donLng = (data['longitude'] as num?)?.toDouble();
+            if (donLat == null || donLng == null) {
+              // No coordinates on this donation — exclude from radius-filtered view
+              return false;
+            }
+            final distKm = _mapService.calculateDistance(_userLat!, _userLng!, donLat, donLng);
+            if (distKm > _selectedRadius!) return false;
+          }
+
           return true;
         }).toList();
+
+        // Sort by distance when radius is active
+        if (_selectedRadius != null && _userLat != null && _userLng != null) {
+          filteredDonations.sort((a, b) {
+            final aData = a.data() as Map<String, dynamic>;
+            final bData = b.data() as Map<String, dynamic>;
+            final aLat = (aData['latitude'] as num?)?.toDouble();
+            final aLng = (aData['longitude'] as num?)?.toDouble();
+            final bLat = (bData['latitude'] as num?)?.toDouble();
+            final bLng = (bData['longitude'] as num?)?.toDouble();
+            if (aLat == null || aLng == null) return 1;
+            if (bLat == null || bLng == null) return -1;
+            final aDist = _mapService.calculateDistance(_userLat!, _userLng!, aLat, aLng);
+            final bDist = _mapService.calculateDistance(_userLat!, _userLng!, bLat, bLng);
+            return aDist.compareTo(bDist);
+          });
+        }
 
         if (filteredDonations.isEmpty) {
           return _buildEmptyState();
@@ -415,14 +595,21 @@ class _RecipientDashboardScreenState extends State<RecipientDashboardScreen> wit
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
           gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: 2,
-            childAspectRatio: 0.85,
+            childAspectRatio: 0.78,
             crossAxisSpacing: 12,
             mainAxisSpacing: 12,
           ),
           itemCount: filteredDonations.length,
           itemBuilder: (context, index) {
             final donation = filteredDonations[index].data() as Map<String, dynamic>;
-            return _buildDonationCard(donation, filteredDonations[index].id);
+            // Calculate distance to this donation
+            final donLat = (donation['latitude'] as num?)?.toDouble();
+            final donLng = (donation['longitude'] as num?)?.toDouble();
+            double? distKm;
+            if (_userLat != null && _userLng != null && donLat != null && donLng != null) {
+              distKm = _mapService.calculateDistance(_userLat!, _userLng!, donLat, donLng);
+            }
+            return _buildDonationCard(donation, filteredDonations[index].id, distKm: distKm);
           },
         );
       },
@@ -547,10 +734,19 @@ class _RecipientDashboardScreenState extends State<RecipientDashboardScreen> wit
 
   // ─── DONATION CARD ────────────────────────────────────────────────────────
 
-  Widget _buildDonationCard(Map<String, dynamic> donation, String donationId) {
+  Widget _buildDonationCard(Map<String, dynamic> donation, String donationId, {double? distKm}) {
     final imageUrls = List<String>.from(donation['imageUrls'] ?? []);
     final imageUrl = imageUrls.isNotEmpty ? imageUrls[0] : null;
     final category = donation['category'] ?? 'Other';
+
+    // Parse food safety fields
+    final pickupDeadlineTs = donation['pickupDeadline'];
+    final DateTime? pickupDeadline = pickupDeadlineTs is Timestamp
+        ? pickupDeadlineTs.toDate()
+        : null;
+    final dietaryTags = List<String>.from(donation['dietaryTags'] ?? []);
+    final allergenTags = List<String>.from(donation['allergenTags'] ?? []);
+    final isFood = (category as String).toLowerCase() == 'food';
 
     return GestureDetector(
       onTap: () => _showDonationDetails(donation, donationId),
@@ -560,7 +756,7 @@ class _RecipientDashboardScreenState extends State<RecipientDashboardScreen> wit
           borderRadius: BorderRadius.circular(18),
           boxShadow: [
             BoxShadow(
-              color: _ocean.withOpacity(0.07),
+              color: _ocean.withValues(alpha: 0.07),
               blurRadius: 14,
               offset: const Offset(0, 4),
             ),
@@ -592,7 +788,7 @@ class _RecipientDashboardScreenState extends State<RecipientDashboardScreen> wit
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                       decoration: BoxDecoration(
-                        color: _ocean.withOpacity(0.72),
+                        color: _ocean.withValues(alpha: 0.72),
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: Text(
@@ -606,6 +802,16 @@ class _RecipientDashboardScreenState extends State<RecipientDashboardScreen> wit
                       ),
                     ),
                   ),
+                  // Perishability badge — shown on food items with a pickup deadline
+                  if (isFood && pickupDeadline != null)
+                    Positioned(
+                      top: 8,
+                      right: 8,
+                      child: PerishabilityBadge(
+                        pickupDeadline: pickupDeadline,
+                        compact: true,
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -647,6 +853,36 @@ class _RecipientDashboardScreenState extends State<RecipientDashboardScreen> wit
                         ),
                       ],
                     ),
+                    // Dietary tags (compact)
+                    if (isFood && dietaryTags.isNotEmpty) ...[
+                      const SizedBox(height: 5),
+                      DietaryTagsRow(tags: dietaryTags, compact: true),
+                    ],
+                    // Allergen warning (compact)
+                    if (isFood && allergenTags.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      AllergenTagsRow(tags: allergenTags, compact: true),
+                    ],
+                    // Distance chip
+                    if (distKm != null) ...[
+                      const SizedBox(height: 5),
+                      Row(
+                        children: [
+                          Icon(Icons.near_me_rounded, size: 10, color: _wave),
+                          const SizedBox(width: 3),
+                          Text(
+                            distKm < 1
+                                ? '${(distKm * 1000).round()} m away'
+                                : '${distKm.toStringAsFixed(1)} km away',
+                            style: TextStyle(
+                              fontSize: 9.5,
+                              color: _wave,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                     const Spacer(),
                     // Request CTA
                     Container(
@@ -865,6 +1101,12 @@ class _RecipientDashboardScreenState extends State<RecipientDashboardScreen> wit
                           ),
                         ),
 
+                      // Food safety info block (food donations only)
+                      if ((donation['category'] as String? ?? '').toLowerCase() == 'food') ...[
+                        const SizedBox(height: 16),
+                        _buildFoodSafetyDetailBlock(donation),
+                      ],
+
                       // Description
                       Container(
                         width: double.infinity,
@@ -890,7 +1132,75 @@ class _RecipientDashboardScreenState extends State<RecipientDashboardScreen> wit
                       _buildDetailRow(Icons.star_rounded, 'Condition', donation['condition']),
                       _buildDetailRow(Icons.location_on_rounded, 'Location', donation['location']),
 
-                      const SizedBox(height: 24),
+                      // Get Directions button (only if donation has coordinates)
+                      if (donation['latitude'] != null && donation['longitude'] != null) ...[
+                        const SizedBox(height: 16),
+                        GestureDetector(
+                          onTap: () async {
+                            final lat = (donation['latitude'] as num).toDouble();
+                            final lng = (donation['longitude'] as num).toDouble();
+                            await _mapService.openNavigationToCoords(lat, lng, label: donation['title']);
+                          },
+                          child: Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.symmetric(vertical: 13),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFE4F2F8),
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(color: _wave.withValues(alpha: 0.3)),
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.directions_rounded, color: _wave, size: 18),
+                                const SizedBox(width: 8),
+                                Text(
+                                  'Get Directions',
+                                  style: TextStyle(
+                                    color: _wave,
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                      // Message Donor button
+                      const SizedBox(height: 12),
+                      GestureDetector(
+                        onTap: () {
+                          Navigator.pop(context);
+                          _openChatWithDonor(donationId, donation);
+                        },
+                        child: Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(vertical: 13),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(color: _wave, width: 1.5),
+                          ),
+                          child: const Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.chat_bubble_outline_rounded, color: _wave, size: 18),
+                              SizedBox(width: 8),
+                              Text(
+                                'Message Donor',
+                                style: TextStyle(
+                                  color: _wave,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+
+                      const SizedBox(height: 12),
 
                       // Request button
                       GestureDetector(
@@ -940,8 +1250,9 @@ class _RecipientDashboardScreenState extends State<RecipientDashboardScreen> wit
 
   Widget _buildDetailRow(IconData icon, String label, String? value) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.only(bottom: 12),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
             width: 32,
@@ -952,27 +1263,228 @@ class _RecipientDashboardScreenState extends State<RecipientDashboardScreen> wit
             ),
             child: Icon(icon, size: 15, color: _wave),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 10),
           Text(
             label,
-            style: TextStyle(
+            style: const TextStyle(
               fontSize: 13,
               color: _slate,
               fontWeight: FontWeight.w500,
             ),
           ),
-          const Spacer(),
-          Text(
-            value ?? 'N/A',
-            style: const TextStyle(
-              fontSize: 13,
-              color: _ink,
-              fontWeight: FontWeight.w600,
+          const SizedBox(width: 14),
+          Expanded(
+            child: Text(
+              value ?? 'N/A',
+              textAlign: TextAlign.end,
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 13,
+                color: _ink,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
         ],
       ),
     );
+  }
+
+  // ─── FOOD SAFETY DETAIL BLOCK ─────────────────────────────────────────────
+
+  Widget _buildFoodSafetyDetailBlock(Map<String, dynamic> donation) {
+    final pickupDeadlineTs = donation['pickupDeadline'];
+    final DateTime? pickupDeadline =
+        pickupDeadlineTs is Timestamp ? pickupDeadlineTs.toDate() : null;
+
+    final cookedAtTs = donation['cookedAt'];
+    final DateTime? cookedAt =
+        cookedAtTs is Timestamp ? cookedAtTs.toDate() : null;
+
+    final dietaryTags = List<String>.from(donation['dietaryTags'] ?? []);
+    final allergenTags = List<String>.from(donation['allergenTags'] ?? []);
+
+    if (pickupDeadline == null &&
+        cookedAt == null &&
+        dietaryTags.isEmpty &&
+        allergenTags.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF0F6FA),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFD8EAF2), width: 1),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Text('🍱', style: TextStyle(fontSize: 14)),
+              SizedBox(width: 6),
+              Text(
+                'Food Safety Info',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
+                  color: Color(0xFF0D3D56),
+                  letterSpacing: -0.2,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+
+          // Pickup countdown badge (prominent)
+          if (pickupDeadline != null) ...[ 
+            PerishabilityBadge(pickupDeadline: pickupDeadline),
+            const SizedBox(height: 10),
+          ],
+
+          // Cooked at info
+          if (cookedAt != null) ...[ 
+            _buildFoodInfoRow(
+              Icons.restaurant_rounded,
+              'Prepared at',
+              '${cookedAt.day}/${cookedAt.month}/${cookedAt.year}  '
+                  '${cookedAt.hour}:${cookedAt.minute.toString().padLeft(2, '0')}',
+            ),
+          ],
+
+          // Pickup deadline row
+          if (pickupDeadline != null) ...[ 
+            const SizedBox(height: 6),
+            _buildFoodInfoRow(
+              Icons.timer_rounded,
+              'Pickup by',
+              '${pickupDeadline.day}/${pickupDeadline.month}/${pickupDeadline.year}  '
+                  '${pickupDeadline.hour}:${pickupDeadline.minute.toString().padLeft(2, '0')}',
+            ),
+          ],
+
+          // Dietary tags
+          if (dietaryTags.isNotEmpty) ...[ 
+            const SizedBox(height: 10),
+            const Text(
+              'Dietary',
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                color: Color(0xFF5A7080),
+              ),
+            ),
+            const SizedBox(height: 6),
+            DietaryTagsRow(tags: dietaryTags),
+          ],
+
+          // Allergen tags
+          if (allergenTags.isNotEmpty) ...[ 
+            const SizedBox(height: 10),
+            const Text(
+              '⚠️ Allergens',
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                color: Color(0xFF5A7080),
+              ),
+            ),
+            const SizedBox(height: 6),
+            AllergenTagsRow(tags: allergenTags),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFoodInfoRow(IconData icon, String label, String value) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, size: 13, color: _wave),
+        const SizedBox(width: 6),
+        Text(
+          '$label: ',
+          style: const TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: _slate,
+          ),
+        ),
+        Expanded(
+          child: Text(
+            value,
+            style: const TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w500,
+              color: _ink,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ─── OPEN CHAT WITH DONOR ────────────────────────────────────────────────
+  Future<void> _openChatWithDonor(String donationId, Map<String, dynamic> donation) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please log in to message donor')),
+      );
+      return;
+    }
+    final donorId = donation['donorId'] as String? ?? '';
+    if (donorId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Donor information unavailable for this donation')),
+      );
+      return;
+    }
+    final donorName = donation['donorName'] as String? ?? 'Donor';
+    final recipientName = user.displayName ?? (user.email?.split('@').first ?? 'Recipient');
+    final title = donation['title'] as String? ?? 'Donation';
+
+    try {
+      final chatId = await _chatService.getOrCreateChat(
+        donationId: donationId,
+        donationTitle: title,
+        donorId: donorId,
+        donorName: donorName,
+        recipientId: user.uid,
+        recipientName: recipientName,
+      );
+
+      if (!mounted) return;
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ChatScreen(
+            chatId: chatId,
+            otherUserName: donorName,
+            otherUserPhone: donation['donorPhone'] as String?,
+            donationTitle: title,
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      final msg = e.toString().contains('permission-denied')
+          ? 'Chat requires Firestore "chats" collection permissions in Firebase Console.'
+          : 'Could not open chat: $e';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(msg),
+          backgroundColor: const Color(0xFFC0392B),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        ),
+      );
+    }
   }
 
   // ─── HANDLE REQUEST (UNCHANGED) ───────────────────────────────────────────
@@ -1234,3 +1746,51 @@ class _DotGridPainter extends CustomPainter {
   @override
   bool shouldRepaint(_DotGridPainter old) => false;
 }
+
+// ─── RADIUS FILTER CHIP ───────────────────────────────────────────────────
+
+class _RadiusChip extends StatelessWidget {
+  final String label;
+  final bool isSelected;
+  final bool isDisabled;
+  final VoidCallback onTap;
+
+  const _RadiusChip({
+    required this.label,
+    required this.isSelected,
+    this.isDisabled = false,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    const wave = Color(0xFF1A6B8A);
+    const slate = Color(0xFF5A7080);
+    const divider = Color(0xFFD8EAF2);
+
+    return GestureDetector(
+      onTap: isDisabled ? null : onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+        decoration: BoxDecoration(
+          color: isSelected ? wave : Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: isSelected ? wave : divider,
+            width: isSelected ? 0 : 1,
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+            color: isSelected ? Colors.white : (isDisabled ? Colors.grey[400] : slate),
+          ),
+        ),
+      ),
+    );
+  }
+}
+

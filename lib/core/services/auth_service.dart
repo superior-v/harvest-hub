@@ -1,5 +1,6 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:harvest/core/services/user_preferences_service.dart';
 
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
@@ -69,6 +70,7 @@ class AuthService {
   Future<void> signOut() async {
     try {
       debugPrint('🔵 Attempting logout');
+      await UserPreferencesService.clearUserData();
       await _auth.signOut();
       debugPrint('✅ Logout successful');
     } catch (e) {

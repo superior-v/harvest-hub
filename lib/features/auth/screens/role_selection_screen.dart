@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:harvest/core/constants/app_constants.dart';
+import 'package:harvest/core/services/user_preferences_service.dart';
 
 class RoleSelectionScreen extends StatefulWidget {
   const RoleSelectionScreen({Key? key}) : super(key: key);
@@ -27,15 +28,36 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
 
                 // App Logo
                 Container(
-                  padding: const EdgeInsets.all(20),
+                  width: 88,
+                  height: 88,
                   decoration: BoxDecoration(
-                    color: AppColors.primaryGreen.withOpacity(0.14),
-                    shape: BoxShape.circle,
+                    borderRadius: BorderRadius.circular(22),
+                    boxShadow: [
+                      BoxShadow(
+                        color: AppColors.primaryGreen.withOpacity(0.25),
+                        blurRadius: 20,
+                        offset: const Offset(0, 8),
+                      ),
+                    ],
                   ),
-                  child: const Icon(
-                    Icons.eco,
-                    size: 64,
-                    color: AppColors.deepGreen,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(22),
+                    child: Image.asset(
+                      'assets/images/app_logo.png',
+                      fit: BoxFit.cover,
+                      errorBuilder: (context, error, stackTrace) => Container(
+                        padding: const EdgeInsets.all(20),
+                        decoration: BoxDecoration(
+                          color: AppColors.primaryGreen.withOpacity(0.14),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(
+                          Icons.eco,
+                          size: 48,
+                          color: AppColors.deepGreen,
+                        ),
+                      ),
+                    ),
                   ),
                 ),
 
@@ -163,6 +185,14 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
         'role': role,
         'updatedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
+
+      // Cache the role and session info locally for fast launches
+      await UserPreferencesService.saveUserSession(
+        uid: user.uid,
+        email: user.email,
+        name: user.displayName,
+        role: role,
+      );
 
       if (!mounted) return;
       Navigator.pushReplacementNamed(context, route);
