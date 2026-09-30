@@ -114,11 +114,27 @@ class _RequestsScreenState extends State<RequestsScreen> with SingleTickerProvid
     }
   }
 
+  bool _initializedRole = false;
+
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
-    _userRoleFuture = _resolveUserRole();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_initializedRole) {
+      final args = ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
+      if (args != null && args.containsKey('isDonorView')) {
+        final isDonorView = args['isDonorView'] == true;
+        _userRoleFuture = Future.value(isDonorView ? 'donor' : 'recipient');
+      } else {
+        _userRoleFuture = _resolveUserRole();
+      }
+      _initializedRole = true;
+    }
   }
 
   @override
@@ -153,7 +169,7 @@ class _RequestsScreenState extends State<RequestsScreen> with SingleTickerProvid
 
   Widget _buildAppBar(bool innerBoxIsScrolled) {
     return SliverAppBar(
-      expandedHeight: 148,
+      expandedHeight: 200,
       floating: false,
       pinned: true,
       elevation: 0,
@@ -206,7 +222,7 @@ class _RequestsScreenState extends State<RequestsScreen> with SingleTickerProvid
             Positioned(
               left: 0,
               right: 0,
-              bottom: 0,
+              bottom: 46,
               child: AnimatedOpacity(
                 duration: const Duration(milliseconds: 180),
                 opacity: innerBoxIsScrolled ? 0 : 1,
@@ -379,10 +395,62 @@ class _RequestsScreenState extends State<RequestsScreen> with SingleTickerProvid
           stream: stream,
           builder: (context, snapshot) {
             if (snapshot.hasError) {
+              debugPrint('❌ Requests stream error: ${snapshot.error}');
               return Center(
-                child: Text(
-                  'Failed to load requests',
-                  style: TextStyle(color: _slate, fontSize: 14),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 32),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Container(
+                        width: 64,
+                        height: 64,
+                        decoration: BoxDecoration(
+                          color: _dew,
+                          borderRadius: BorderRadius.circular(18),
+                        ),
+                        child: Center(
+                          child: Icon(Icons.cloud_off_rounded, size: 28, color: _wave.withOpacity(0.5)),
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      const Text(
+                        'Could not load requests',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                          color: _ink,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Please check your internet connection and try again',
+                        style: TextStyle(fontSize: 13, color: _slate),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 16),
+                      GestureDetector(
+                        onTap: () => setState(() {
+                          _userRoleFuture = _resolveUserRole();
+                        }),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
+                          decoration: BoxDecoration(
+                            color: _wave,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: const Text(
+                            'Retry',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               );
             }
@@ -392,6 +460,10 @@ class _RequestsScreenState extends State<RequestsScreen> with SingleTickerProvid
             }
 
             final requests = snapshot.data?.docs.map(_mapRequestDoc).toList() ?? <DonationRequest>[];
+            
+            // Sort locally to avoid needing a composite index in Firestore
+            requests.sort((a, b) => b.requestDate.compareTo(a.requestDate));
+            
             final filteredRequests = requests.where((r) {
               final status = _normalizeStatus(r.status);
               final isActive = status == 'pending' || status == 'approved';
@@ -1702,6 +1774,12 @@ class _RequestsScreenState extends State<RequestsScreen> with SingleTickerProvid
         return Icons.medication_rounded;
       case 'toys':
         return Icons.toys_rounded;
+      case 'organic waste':
+        return Icons.eco_rounded;
+      case 'manure':
+        return Icons.recycling_rounded;
+      case 'seeds':
+        return Icons.grass_rounded;
       default:
         return Icons.inventory_2_rounded;
     }

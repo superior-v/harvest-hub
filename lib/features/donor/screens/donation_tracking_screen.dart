@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:harvest/core/constants/app_constants.dart';
 import 'package:harvest/core/widgets/custom_widgets.dart';
 import 'package:harvest/models/donation_model.dart';
@@ -138,7 +140,7 @@ class _DonationTrackingScreenState extends State<DonationTrackingScreen> with Si
 
   Widget _buildAppBar(bool innerBoxIsScrolled) {
     return SliverAppBar(
-      expandedHeight: 148,
+      expandedHeight: 200,
       floating: false,
       pinned: true,
       snap: false,
@@ -177,7 +179,7 @@ class _DonationTrackingScreenState extends State<DonationTrackingScreen> with Si
             Positioned(
               left: 0,
               right: 0,
-              bottom: 0,
+              bottom: 48,
               child: AnimatedOpacity(
                 duration: const Duration(milliseconds: 180),
                 opacity: innerBoxIsScrolled ? 0 : 1,
@@ -330,49 +332,95 @@ class _DonationTrackingScreenState extends State<DonationTrackingScreen> with Si
   }
 
   Widget _buildDonationsList() {
-    final donations = _getSampleDonations();
-    final filteredDonations = _selectedFilter == 'All' ? donations : donations.where((d) => d.status.toLowerCase() == _selectedFilter.toLowerCase()).toList();
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return const SizedBox.shrink();
 
-    if (filteredDonations.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: 64,
-              height: 64,
-              decoration: BoxDecoration(
-                color: _dew,
-                borderRadius: BorderRadius.circular(18),
-              ),
-              child: const Center(
-                child: Icon(Icons.inbox_outlined, size: 28, color: _leaf),
-              ),
-            ),
-            const SizedBox(height: 14),
-            const Text(
-              'No donations found',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w700,
-                color: _ink,
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              'Try a different filter',
-              style: TextStyle(fontSize: 13, color: _slate),
-            ),
-          ],
-        ),
-      );
-    }
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance.collection('donations').where('donorId', isEqualTo: user.uid).snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator(valueColor: AlwaysStoppedAnimation<Color>(_leaf)));
+        }
 
-    return ListView.builder(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-      itemCount: filteredDonations.length,
-      itemBuilder: (context, index) {
-        return _buildDonationCard(filteredDonations[index]);
+        if (snapshot.hasError) {
+          return Center(child: Text('Error: ${snapshot.error}', style: const TextStyle(color: Colors.red)));
+        }
+
+        final docs = snapshot.data?.docs ?? [];
+        
+        // Map to Donation models
+        var donations = docs.map((doc) {
+          final data = doc.data() as Map<String, dynamic>;
+          data['id'] = doc.id; // ensure ID is set
+          
+          // Handle Timestamp to String for fromMap
+          if (data['postedDate'] == null) {
+              if (data['createdAt'] is Timestamp) {
+                  data['postedDate'] = (data['createdAt'] as Timestamp).toDate().toIso8601String();
+              } else {
+                  data['postedDate'] = DateTime.now().toIso8601String();
+              }
+          } else if (data['postedDate'] is Timestamp) {
+              data['postedDate'] = (data['postedDate'] as Timestamp).toDate().toIso8601String();
+          }
+
+          if (data['pickupDate'] is Timestamp) {
+            data['pickupDate'] = (data['pickupDate'] as Timestamp).toDate().toIso8601String();
+          }
+
+          return Donation.fromMap(data);
+        }).toList();
+
+        // Apply filter
+        if (_selectedFilter != 'All') {
+          donations = donations.where((d) => d.status.toLowerCase() == _selectedFilter.toLowerCase()).toList();
+        }
+
+        // Sort descending by date
+        donations.sort((a, b) => b.postedDate.compareTo(a.postedDate));
+
+        if (donations.isEmpty) {
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Container(
+                  width: 64,
+                  height: 64,
+                  decoration: BoxDecoration(
+                    color: _dew,
+                    borderRadius: BorderRadius.circular(18),
+                  ),
+                  child: const Center(
+                    child: Icon(Icons.inbox_outlined, size: 28, color: _leaf),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                const Text(
+                  'No donations found',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    color: _ink,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Try a different filter',
+                  style: TextStyle(fontSize: 13, color: _slate),
+                ),
+              ],
+            ),
+          );
+        }
+
+        return ListView.builder(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+          itemCount: donations.length,
+          itemBuilder: (context, index) {
+            return _buildDonationCard(donations[index]);
+          },
+        );
       },
     );
   }
@@ -655,113 +703,134 @@ class _DonationTrackingScreenState extends State<DonationTrackingScreen> with Si
   // ─── ANALYTICS TAB ────────────────────────────────────────────────────────
 
   Widget _buildAnalyticsTab() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(16, 20, 16, 32),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // ── Impact header ──
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              gradient: _heroGradient,
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: Stack(
-              children: [
-                Positioned(
-                  right: -10,
-                  top: -10,
-                  child: _Blob(size: 90, color: _leaf.withOpacity(0.3)),
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return const SizedBox.shrink();
+
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance.collection('donations').where('donorId', isEqualTo: user.uid).snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: Padding(padding: EdgeInsets.all(40), child: CircularProgressIndicator(valueColor: AlwaysStoppedAnimation<Color>(_leaf))));
+        }
+
+        final docs = snapshot.data?.docs ?? [];
+        
+        int totalDonations = docs.length;
+        int completedDonations = 0;
+        int totalViews = 0;
+        int totalRequests = 0;
+        Map<String, int> categoryCounts = {};
+
+        for (var doc in docs) {
+          final data = doc.data() as Map<String, dynamic>;
+          if (data['status'] == 'completed') completedDonations++;
+          totalViews += (data['views'] as num?)?.toInt() ?? 0;
+          totalRequests += (data['requests'] as num?)?.toInt() ?? 0;
+          
+          final category = data['category'] as String? ?? 'Other';
+          categoryCounts[category] = (categoryCounts[category] ?? 0) + 1;
+        }
+
+        // Sort categories by count
+        final sortedCategories = categoryCounts.entries.toList()
+          ..sort((a, b) => b.value.compareTo(a.value));
+          
+        final maxCategoryCount = sortedCategories.isEmpty ? 1 : sortedCategories.first.value;
+
+        return SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(16, 20, 16, 32),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // ── Impact header ──
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  gradient: _heroGradient,
+                  borderRadius: BorderRadius.circular(20),
                 ),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                child: Stack(
                   children: [
-                    const Text(
-                      'Your Impact',
-                      style: TextStyle(
-                        color: Color(0xFF9DC99A),
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: 0.4,
-                      ),
+                    Positioned(
+                      right: -10,
+                      top: -10,
+                      child: _Blob(size: 90, color: _leaf.withOpacity(0.3)),
                     ),
-                    const SizedBox(height: 4),
-                    const Text(
-                      'Making a difference\nevery day',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 20,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: -0.5,
-                        height: 1.2,
-                      ),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Your Impact',
+                          style: TextStyle(
+                            color: Color(0xFF9DC99A),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: 0.4,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        const Text(
+                          'Making a difference\nevery day',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 20,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: -0.5,
+                            height: 1.2,
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
+              ),
+
+              const SizedBox(height: 16),
+
+              // ── 2×2 analytics grid ──
+              Row(
+                children: [
+                  Expanded(
+                    child: _buildAnalyticsCard('$totalDonations', 'Total\nDonations', Icons.volunteer_activism_rounded, _leaf, _dew),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _buildAnalyticsCard('$completedDonations', 'Completed', Icons.task_alt_rounded, _sprout, const Color(0xFFEAF7EA)),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(
+                    child: _buildAnalyticsCard('$totalViews', 'Total\nViews', Icons.visibility_rounded, _sky, const Color(0xFFE7F3FB)),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _buildAnalyticsCard('$totalRequests', 'Total\nRequests', Icons.favorite_rounded, _clay, const Color(0xFFFAEEE5)),
+                  ),
+                ],
+              ),
+
+              if (sortedCategories.isNotEmpty) ...[
+                const SizedBox(height: 20),
+                // ── Category bars ──
+                _buildSectionCard(
+                  title: 'Most Donated Categories',
+                  child: Column(
+                    children: sortedCategories.take(3).map((entry) {
+                      final colors = [_clay, _sky, _leaf];
+                      final colorIndex = sortedCategories.indexOf(entry) % colors.length;
+                      return _buildCategoryBar(entry.key, entry.value, maxCategoryCount, colors[colorIndex]);
+                    }).toList(),
+                  ),
+                ),
               ],
-            ),
-          ),
-
-          const SizedBox(height: 16),
-
-          // ── 2×2 analytics grid ──
-          Row(
-            children: [
-              Expanded(
-                child: _buildAnalyticsCard('15', 'Total\nDonations', Icons.volunteer_activism_rounded, _leaf, _dew),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _buildAnalyticsCard('12', 'Completed', Icons.task_alt_rounded, _sprout, const Color(0xFFEAF7EA)),
-              ),
             ],
           ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                child: _buildAnalyticsCard('247', 'Total\nViews', Icons.visibility_rounded, _sky, const Color(0xFFE7F3FB)),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _buildAnalyticsCard('45', 'Total\nRequests', Icons.favorite_rounded, _clay, const Color(0xFFFAEEE5)),
-              ),
-            ],
-          ),
-
-          const SizedBox(height: 20),
-
-          // ── Category bars ──
-          _buildSectionCard(
-            title: 'Most Donated Categories',
-            child: Column(
-              children: [
-                _buildCategoryBar('Food', 8, 10, _clay),
-                _buildCategoryBar('Clothes', 5, 10, _sky),
-                _buildCategoryBar('Books', 2, 10, _leaf),
-              ],
-            ),
-          ),
-
-          const SizedBox(height: 12),
-
-          // ── Recent activity ──
-          _buildSectionCard(
-            title: 'Recent Activity',
-            actionLabel: 'View All',
-            onAction: () {},
-            child: Column(
-              children: [
-                _buildActivityItem(Icons.eco_rounded, 'Fresh Vegetables matched with recipient', '2 hours ago', _sky),
-                _buildActivityItem(Icons.checkroom_rounded, 'New request on Winter Clothes', '5 hours ago', _clay),
-                _buildActivityItem(Icons.menu_book_rounded, 'Books donation completed', '1 day ago', _sprout),
-              ],
-            ),
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 

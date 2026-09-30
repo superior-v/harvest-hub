@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:harvest/core/constants/app_constants.dart';
 import 'package:harvest/core/services/image_picker_service.dart';
 import 'package:harvest/core/services/storage_service.dart';
@@ -50,6 +51,7 @@ class _PostDonationScreenState extends State<PostDonationScreen> {
   final _descriptionController = TextEditingController();
   final _quantityController = TextEditingController();
   final _locationController = TextEditingController();
+  final _donorPhoneController = TextEditingController();
 
   // Selected data
   String _selectedCategory = 'Food';
@@ -67,6 +69,9 @@ class _PostDonationScreenState extends State<PostDonationScreen> {
     'Books',
     'Toys',
     'Medicine',
+    'Organic Waste',
+    'Manure',
+    'Seeds',
     'Other'
   ];
 
@@ -83,6 +88,7 @@ class _PostDonationScreenState extends State<PostDonationScreen> {
     _descriptionController.dispose();
     _quantityController.dispose();
     _locationController.dispose();
+    _donorPhoneController.dispose();
     super.dispose();
   }
 
@@ -95,117 +101,112 @@ class _PostDonationScreenState extends State<PostDonationScreen> {
       appBar: AppBar(
         title: const Text(
           'Post Donation',
-          style: TextStyle(fontWeight: FontWeight.w800),
+          style: TextStyle(fontWeight: FontWeight.w800, letterSpacing: -0.5),
         ),
         backgroundColor: _forest,
         elevation: 0,
+        centerTitle: true,
         systemOverlayStyle: SystemUiOverlayStyle.light,
         flexibleSpace: Container(decoration: const BoxDecoration(gradient: _heroGradient)),
       ),
       body: _isUploading
           ? _buildUploadingScreen()
-          : Padding(
-              padding: const EdgeInsets.all(12),
-              child: Container(
-                decoration: BoxDecoration(
-                  color: _cardBg,
-                  borderRadius: BorderRadius.circular(20),
-                  boxShadow: [
-                    BoxShadow(
-                      color: _forest.withOpacity(0.08),
-                      blurRadius: 18,
-                      offset: const Offset(0, 6),
-                    ),
-                  ],
-                ),
-                child: Theme(
-                  data: Theme.of(context).copyWith(
-                    colorScheme: const ColorScheme.light(
-                      primary: _leaf,
+          : Column(
+              children: [
+                Expanded(
+                  child: SingleChildScrollView(
+                    physics: const BouncingScrollPhysics(),
+                    padding: const EdgeInsets.fromLTRB(16, 20, 16, 120),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _buildSectionHeader('Basic Info', Icons.info_outline_rounded),
+                        _buildCard(_buildBasicInfoStep()),
+                        
+                        const SizedBox(height: 24),
+                        _buildSectionHeader('Details', Icons.category_outlined),
+                        _buildCard(_buildDetailsStep()),
+                        
+                        const SizedBox(height: 24),
+                        _buildSectionHeader('Location', Icons.location_on_outlined),
+                        _buildCard(_buildLocationStep()),
+                        
+                        const SizedBox(height: 24),
+                        _buildSectionHeader('Photos (Optional)', Icons.photo_camera_back_outlined),
+                        _buildCard(_buildImagesStep()),
+                      ],
                     ),
                   ),
-                  child: Stepper(
-                    currentStep: _currentStep,
-                    onStepContinue: _onStepContinue,
-                    onStepCancel: _onStepCancel,
-                    controlsBuilder: (context, details) {
-                      return Padding(
-                        padding: const EdgeInsets.only(top: 20),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: ElevatedButton(
-                                onPressed: details.onStepContinue,
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: _leaf,
-                                  padding: const EdgeInsets.symmetric(vertical: 14),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                ),
-                                child: Text(
-                                  _currentStep == 3 ? 'Submit' : 'Continue',
-                                  style: const TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.white,
-                                  ),
-                                ),
-                              ),
-                            ),
-                            if (_currentStep > 0) ...[
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: OutlinedButton(
-                                  onPressed: details.onStepCancel,
-                                  style: OutlinedButton.styleFrom(
-                                    padding: const EdgeInsets.symmetric(vertical: 14),
-                                    side: const BorderSide(color: _leaf),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                  ),
-                                  child: const Text(
-                                    'Back',
-                                    style: TextStyle(color: _leaf),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ],
-                        ),
-                      );
-                    },
-                    steps: [
-                      Step(
-                        title: const Text('Basic Info'),
-                        isActive: _currentStep >= 0,
-                        state: _currentStep > 0 ? StepState.complete : StepState.indexed,
-                        content: _buildBasicInfoStep(),
-                      ),
-                      Step(
-                        title: const Text('Details'),
-                        isActive: _currentStep >= 1,
-                        state: _currentStep > 1 ? StepState.complete : StepState.indexed,
-                        content: _buildDetailsStep(),
-                      ),
-                      Step(
-                        title: const Text('Photos'),
-                        isActive: _currentStep >= 2,
-                        state: _currentStep > 2 ? StepState.complete : StepState.indexed,
-                        content: _buildImagesStep(),
-                      ),
-                      Step(
-                        title: const Text('Location'),
-                        isActive: _currentStep >= 3,
-                        state: _currentStep > 3 ? StepState.complete : StepState.indexed,
-                        content: _buildLocationStep(),
-                      ),
-                    ],
-                  ),
                 ),
+              ],
+            ),
+      bottomSheet: _isUploading ? null : Container(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
+        decoration: BoxDecoration(
+          color: _cardBg,
+          boxShadow: [
+            BoxShadow(color: _forest.withOpacity(0.05), blurRadius: 20, offset: const Offset(0, -5)),
+          ],
+        ),
+        child: SafeArea(
+          child: SizedBox(
+            width: double.infinity,
+            height: 56,
+            child: ElevatedButton(
+              onPressed: _submitDonation,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _leaf,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                elevation: 0,
+              ),
+              child: const Text(
+                'Post Donation',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: Colors.white, letterSpacing: 0.5),
               ),
             ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSectionHeader(String title, IconData icon) {
+    return Padding(
+      padding: const EdgeInsets.only(left: 4, bottom: 12),
+      child: Row(
+        children: [
+          Icon(icon, size: 20, color: _leaf),
+          const SizedBox(width: 8),
+          Text(
+            title,
+            style: const TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w800,
+              color: _forest,
+              letterSpacing: -0.5,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCard(Widget child) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: _cardBg,
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: [
+          BoxShadow(
+            color: _forest.withOpacity(0.04),
+            blurRadius: 20,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: child,
     );
   }
 
@@ -236,35 +237,87 @@ class _PostDonationScreenState extends State<PostDonationScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        TextField(
+        _buildTextField(
           controller: _titleController,
-          decoration: InputDecoration(
-            labelText: 'Title *',
-            hintText: 'e.g., Fresh Vegetables',
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-            prefixIcon: const Icon(Icons.title, color: AppColors.primaryGreen),
-          ),
+          label: 'Title *',
+          hint: 'e.g., Fresh Vegetables',
+          icon: Icons.title_rounded,
         ),
         const SizedBox(height: 16),
-        TextField(
+        _buildTextField(
           controller: _descriptionController,
+          label: 'Description *',
+          hint: 'Describe your donation...',
+          icon: Icons.description_outlined,
           maxLines: 4,
-          decoration: InputDecoration(
-            labelText: 'Description *',
-            hintText: 'Describe your donation...',
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-            prefixIcon: const Icon(Icons.description, color: AppColors.primaryGreen),
-          ),
         ),
         const SizedBox(height: 16),
-        TextField(
+        _buildTextField(
           controller: _quantityController,
-          keyboardType: TextInputType.text,
+          label: 'Quantity *',
+          hint: 'e.g., 10 kg or 5 items',
+          icon: Icons.inventory_2_outlined,
+        ),
+        const SizedBox(height: 16),
+        _buildTextField(
+          controller: _donorPhoneController,
+          label: 'Contact Phone *',
+          hint: 'So recipients can reach you',
+          icon: Icons.phone_outlined,
+          keyboardType: TextInputType.phone,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildTextField({
+    required TextEditingController controller,
+    required String label,
+    required String hint,
+    required IconData icon,
+    int maxLines = 1,
+    TextInputType keyboardType = TextInputType.text,
+    bool readOnly = false,
+    Widget? suffixIcon,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+            color: _forest,
+          ),
+        ),
+        const SizedBox(height: 8),
+        TextField(
+          controller: controller,
+          maxLines: maxLines,
+          keyboardType: keyboardType,
+          readOnly: readOnly,
+          style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500, color: Colors.black87),
           decoration: InputDecoration(
-            labelText: 'Quantity *',
-            hintText: 'e.g., 10 kg or 5 items',
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-            prefixIcon: const Icon(Icons.inventory, color: AppColors.primaryGreen),
+            hintText: hint,
+            hintStyle: TextStyle(color: Colors.grey.shade400, fontWeight: FontWeight.w400),
+            filled: true,
+            fillColor: _mist.withOpacity(0.5),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(16),
+              borderSide: BorderSide.none,
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(16),
+              borderSide: BorderSide(color: _divider, width: 1.5),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(16),
+              borderSide: const BorderSide(color: _leaf, width: 2),
+            ),
+            prefixIcon: Icon(icon, color: _leaf, size: 22),
+            suffixIcon: suffixIcon,
+            contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: maxLines > 1 ? 16 : 0),
           ),
         ),
       ],
@@ -281,8 +334,8 @@ class _PostDonationScreenState extends State<PostDonationScreen> {
         ),
         const SizedBox(height: 12),
         Wrap(
-          spacing: 8,
-          runSpacing: 8,
+          spacing: 10,
+          runSpacing: 10,
           children: _categories.map((category) {
             final isSelected = _selectedCategory == category;
             return ChoiceChip(
@@ -291,10 +344,16 @@ class _PostDonationScreenState extends State<PostDonationScreen> {
               onSelected: (selected) {
                 setState(() => _selectedCategory = category);
               },
+              backgroundColor: _mist,
               selectedColor: _leaf,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+                side: BorderSide(color: isSelected ? _leaf : _divider),
+              ),
               labelStyle: TextStyle(
-                color: isSelected ? Colors.white : Colors.black,
-                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                color: isSelected ? Colors.white : Colors.black87,
+                fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
               ),
             );
           }).toList(),
@@ -302,11 +361,11 @@ class _PostDonationScreenState extends State<PostDonationScreen> {
         const SizedBox(height: 24),
         const Text(
           'Condition',
-          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: _forest),
         ),
         const SizedBox(height: 12),
         Wrap(
-          spacing: 8,
+          spacing: 10,
           children: _conditions.map((condition) {
             final isSelected = _selectedCondition == condition;
             return ChoiceChip(
@@ -315,10 +374,16 @@ class _PostDonationScreenState extends State<PostDonationScreen> {
               onSelected: (selected) {
                 setState(() => _selectedCondition = condition);
               },
+              backgroundColor: _mist,
               selectedColor: _leaf,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+                side: BorderSide(color: isSelected ? _leaf : _divider),
+              ),
               labelStyle: TextStyle(
-                color: isSelected ? Colors.white : Colors.black,
-                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                color: isSelected ? Colors.white : Colors.black87,
+                fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
               ),
             );
           }).toList(),
@@ -374,13 +439,8 @@ class _PostDonationScreenState extends State<PostDonationScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Text(
-          'Add Photos (Optional)',
-          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          'Add up to 5 photos of your donation',
-          style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+          'Add up to 5 photos',
+          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: Colors.black54),
         ),
         const SizedBox(height: 16),
         GridView.builder(
@@ -421,16 +481,17 @@ class _PostDonationScreenState extends State<PostDonationScreen> {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(
-              Icons.add_photo_alternate,
-              size: 40,
-              color: _selectedImages.length < 5 ? _leaf : Colors.grey,
+              Icons.add_photo_alternate_rounded,
+              size: 36,
+              color: _selectedImages.length < 5 ? _leaf.withOpacity(0.8) : Colors.grey,
             ),
             const SizedBox(height: 8),
             Text(
               'Add Photo',
               style: TextStyle(
-                color: _selectedImages.length < 5 ? _leaf : Colors.grey,
-                fontWeight: FontWeight.bold,
+                fontSize: 12,
+                color: _selectedImages.length < 5 ? _leaf.withOpacity(0.8) : Colors.grey,
+                fontWeight: FontWeight.w700,
               ),
             ),
           ],
@@ -474,32 +535,29 @@ class _PostDonationScreenState extends State<PostDonationScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        TextField(
+        _buildTextField(
           controller: _locationController,
+          label: 'Pickup Address *',
+          hint: 'Enter full address or use map',
+          icon: Icons.location_on_outlined,
           maxLines: 2,
-          decoration: InputDecoration(
-            labelText: 'Pickup Location *',
-            hintText: 'Enter full address',
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-            prefixIcon: const Icon(Icons.location_on, color: _leaf),
-            suffixIcon: _isGettingLocation
-                ? const Padding(
-                    padding: EdgeInsets.all(12),
-                    child: SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        valueColor: AlwaysStoppedAnimation<Color>(_leaf),
-                      ),
+          suffixIcon: _isGettingLocation
+              ? const Padding(
+                  padding: EdgeInsets.all(14),
+                  child: SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(_leaf),
                     ),
-                  )
-                : IconButton(
-                    icon: const Icon(Icons.my_location, color: _leaf),
-                    onPressed: _pickLocationFromMap,
-                    tooltip: 'Use current location',
                   ),
-          ),
+                )
+              : IconButton(
+                  icon: const Icon(Icons.my_location_rounded, color: _leaf),
+                  onPressed: _pickLocationFromMap,
+                  tooltip: 'Use current location',
+                ),
         ),
 
         const SizedBox(height: 12),
@@ -529,50 +587,6 @@ class _PostDonationScreenState extends State<PostDonationScreen> {
             ),
           ),
 
-        const SizedBox(height: 16),
-
-        // Summary Card
-        Card(
-          elevation: 2,
-          color: _cardBg,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(14),
-            side: const BorderSide(color: _divider),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Row(
-                  children: [
-                    Icon(Icons.summarize, color: _leaf),
-                    SizedBox(width: 8),
-                    Text(
-                      'Summary',
-                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                    ),
-                  ],
-                ),
-                const Divider(height: 24),
-                _buildSummaryItem('Title', _titleController.text),
-                _buildSummaryItem('Category', _selectedCategory),
-                _buildSummaryItem('Condition', _selectedCondition),
-                _buildSummaryItem('Quantity', _quantityController.text),
-                _buildSummaryItem('Photos', '${_selectedImages.length} image${_selectedImages.length != 1 ? 's' : ''}'),
-                if (_expiryDate != null)
-                  _buildSummaryItem(
-                    'Expiry',
-                    '${_expiryDate!.day}/${_expiryDate!.month}/${_expiryDate!.year}',
-                  ),
-                _buildSummaryItem(
-                  'Location',
-                  _latitude != null ? '✓ Captured' : 'Not set',
-                ),
-              ],
-            ),
-          ),
-        ),
       ],
     );
   }
@@ -777,6 +791,10 @@ class _PostDonationScreenState extends State<PostDonationScreen> {
       _showError('Please enter pickup location');
       return;
     }
+    if (_donorPhoneController.text.trim().isEmpty) {
+      _showError('Please enter a contact phone number');
+      return;
+    }
 
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
@@ -787,6 +805,10 @@ class _PostDonationScreenState extends State<PostDonationScreen> {
     setState(() => _isUploading = true);
 
     try {
+      // Get donor details
+      final userDoc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+      final String donorName = userDoc.data()?['name'] ?? user.displayName ?? 'Unknown Donor';
+
       // Upload images to Firebase Storage
       List<String> imageUrls = [];
       if (_selectedImages.isNotEmpty) {
@@ -810,6 +832,8 @@ class _PostDonationScreenState extends State<PostDonationScreen> {
         longitude: _longitude,
         imageUrls: imageUrls,
         expiryDate: _expiryDate,
+        donorName: donorName,
+        donorPhone: _donorPhoneController.text.trim(),
       );
 
       if (mounted) {

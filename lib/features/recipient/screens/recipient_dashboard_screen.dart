@@ -20,7 +20,7 @@ class _RecipientDashboardScreenState extends State<RecipientDashboardScreen> wit
   AnimationController? _fadeController;
   Animation<double> _fadeAnimation = const AlwaysStoppedAnimation<double>(1.0);
 
-  final List<String> _categories = [
+  List<String> _categories = [
     'All',
     'Food',
     'Clothes',
@@ -31,6 +31,8 @@ class _RecipientDashboardScreenState extends State<RecipientDashboardScreen> wit
     'Medicine',
     'Other'
   ];
+
+  bool _isFarmer = false;
 
   // ─── Design Tokens ────────────────────────────────────────────────────────
   static const Color _ocean = Color(0xFF0D3D56); // deep ocean for recipient
@@ -80,6 +82,12 @@ class _RecipientDashboardScreenState extends State<RecipientDashboardScreen> wit
         return '🧸';
       case 'medicine':
         return '💊';
+      case 'organic waste':
+        return '🥬';
+      case 'manure':
+        return '🪣';
+      case 'seeds':
+        return '🌱';
       default:
         return '📦';
     }
@@ -89,6 +97,29 @@ class _RecipientDashboardScreenState extends State<RecipientDashboardScreen> wit
   void initState() {
     super.initState();
     _initAnimationsIfNeeded();
+    _checkUserRole();
+  }
+
+  Future<void> _checkUserRole() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      final doc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+      if (doc.exists && mounted) {
+        final data = doc.data() as Map<String, dynamic>;
+        if (data['role'] == 'farmer') {
+          setState(() {
+            _isFarmer = true;
+            _categories = [
+              'All',
+              'Organic Waste',
+              'Manure',
+              'Seeds',
+              'Other'
+            ];
+          });
+        }
+      }
+    }
   }
 
   @override
@@ -340,7 +371,7 @@ class _RecipientDashboardScreenState extends State<RecipientDashboardScreen> wit
 
   Widget _buildDonationsStream() {
     return StreamBuilder<QuerySnapshot>(
-      stream: _selectedCategory == 'All' ? FirebaseFirestore.instance.collection('donations').where('status', isEqualTo: 'available').orderBy('createdAt', descending: true).limit(50).snapshots() : FirebaseFirestore.instance.collection('donations').where('status', isEqualTo: 'available').where('category', isEqualTo: _selectedCategory).orderBy('createdAt', descending: true).limit(50).snapshots(),
+      stream: FirebaseFirestore.instance.collection('donations').orderBy('createdAt', descending: true).limit(100).snapshots(),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return _buildLoadingGrid();
@@ -354,7 +385,32 @@ class _RecipientDashboardScreenState extends State<RecipientDashboardScreen> wit
           return _buildEmptyState();
         }
 
-        final donations = snapshot.data!.docs;
+        // Local filtering
+        final allDocs = snapshot.data!.docs;
+        final filteredDonations = allDocs.where((doc) {
+          final data = doc.data() as Map<String, dynamic>;
+          if (data['status'] != 'available') return false;
+          
+          final docCategory = data['category'] as String? ?? 'Other';
+          final farmerCategories = ['Organic Waste', 'Manure', 'Seeds'];
+
+          if (_selectedCategory != 'All') {
+            if (docCategory != _selectedCategory) return false;
+          } else {
+            // 'All' selected: isolate farmer items from NGO items based on role
+            if (_isFarmer) {
+              if (!farmerCategories.contains(docCategory)) return false;
+            } else {
+              if (farmerCategories.contains(docCategory)) return false;
+            }
+          }
+          return true;
+        }).toList();
+
+        if (filteredDonations.isEmpty) {
+          return _buildEmptyState();
+        }
+
         return GridView.builder(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
           gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
@@ -363,10 +419,10 @@ class _RecipientDashboardScreenState extends State<RecipientDashboardScreen> wit
             crossAxisSpacing: 12,
             mainAxisSpacing: 12,
           ),
-          itemCount: donations.length,
+          itemCount: filteredDonations.length,
           itemBuilder: (context, index) {
-            final donation = donations[index].data() as Map<String, dynamic>;
-            return _buildDonationCard(donation, donations[index].id);
+            final donation = filteredDonations[index].data() as Map<String, dynamic>;
+            return _buildDonationCard(donation, filteredDonations[index].id);
           },
         );
       },
@@ -1042,7 +1098,11 @@ class _RecipientDashboardScreenState extends State<RecipientDashboardScreen> wit
                     if (_selectedIndex == i) return;
                     setState(() => _selectedIndex = i);
                     if (routes[i].isNotEmpty) {
-                      Navigator.pushNamed(context, routes[i]);
+                      if (routes[i] == '/requests') {
+                        Navigator.pushNamed(context, routes[i], arguments: {'isDonorView': false});
+                      } else {
+                        Navigator.pushNamed(context, routes[i]);
+                      }
                     }
                   },
                   child: AnimatedContainer(

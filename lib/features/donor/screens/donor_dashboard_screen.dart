@@ -455,7 +455,7 @@ class _DonorDashboardScreenState extends State<DonorDashboardScreen> with Ticker
                         icon: Icons.inbox_rounded,
                         color: _clay,
                         bgColor: const Color(0xFFFAEEE5),
-                        onTap: () => Navigator.pushNamed(context, '/requests'),
+                        onTap: () => Navigator.pushNamed(context, '/requests', arguments: {'isDonorView': true}),
                         stagger: 3,
                         controller: _staggerController,
                       ),
@@ -523,6 +523,8 @@ class _DonorDashboardScreenState extends State<DonorDashboardScreen> with Ticker
                     onTap: () {
                       if (a.route == '/post-donation') {
                         Navigator.pushNamed(context, a.route).then((_) => _loadDonorStats());
+                      } else if (a.route == '/requests') {
+                        Navigator.pushNamed(context, a.route, arguments: {'isDonorView': true});
                       } else {
                         Navigator.pushNamed(context, a.route);
                       }
@@ -652,7 +654,7 @@ class _DonorDashboardScreenState extends State<DonorDashboardScreen> with Ticker
           ),
           const SizedBox(height: 14),
           StreamBuilder<QuerySnapshot>(
-            stream: FirebaseFirestore.instance.collection('donations').where('donorId', isEqualTo: user.uid).where('status', isEqualTo: 'available').orderBy('createdAt', descending: true).limit(5).snapshots(),
+            stream: FirebaseFirestore.instance.collection('donations').where('donorId', isEqualTo: user.uid).snapshots(),
             builder: (context, snapshot) {
               if (snapshot.connectionState == ConnectionState.waiting) {
                 return SizedBox(
@@ -668,7 +670,30 @@ class _DonorDashboardScreenState extends State<DonorDashboardScreen> with Ticker
                 );
               }
 
-              if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+              if (snapshot.hasError) {
+                debugPrint('❌ Active donations error: ${snapshot.error}');
+              }
+
+              // Filter for available donations locally to avoid compound index
+              final allDocs = snapshot.data?.docs ?? [];
+              final activeDocs = allDocs.where((doc) {
+                final data = doc.data() as Map<String, dynamic>;
+                return data['status'] == 'available' && (data['isActive'] == true || data['isActive'] == null);
+              }).toList();
+
+              // Sort locally by createdAt descending
+              activeDocs.sort((a, b) {
+                final aData = a.data() as Map<String, dynamic>;
+                final bData = b.data() as Map<String, dynamic>;
+                final aTime = aData['createdAt'] as Timestamp?;
+                final bTime = bData['createdAt'] as Timestamp?;
+                if (aTime == null || bTime == null) return 0;
+                return bTime.compareTo(aTime);
+              });
+
+              final limitedDocs = activeDocs.take(5).toList();
+
+              if (limitedDocs.isEmpty) {
                 return Padding(
                   padding: const EdgeInsets.only(right: 20),
                   child: _buildEmptyState(
@@ -688,9 +713,9 @@ class _DonorDashboardScreenState extends State<DonorDashboardScreen> with Ticker
                   physics: const BouncingScrollPhysics(),
                   clipBehavior: Clip.none,
                   padding: const EdgeInsets.only(right: 20),
-                  itemCount: snapshot.data!.docs.length,
+                  itemCount: limitedDocs.length,
                   itemBuilder: (context, index) {
-                    final doc = snapshot.data!.docs[index];
+                    final doc = limitedDocs[index];
                     final data = doc.data() as Map<String, dynamic>;
 
                     return FutureBuilder<QuerySnapshot>(
@@ -854,7 +879,7 @@ class _DonorDashboardScreenState extends State<DonorDashboardScreen> with Ticker
           _buildSectionHeader('Recent Activity'),
           const SizedBox(height: 14),
           StreamBuilder<QuerySnapshot>(
-            stream: FirebaseFirestore.instance.collection('donations').where('donorId', isEqualTo: user.uid).orderBy('createdAt', descending: true).limit(5).snapshots(),
+            stream: FirebaseFirestore.instance.collection('donations').where('donorId', isEqualTo: user.uid).snapshots(),
             builder: (context, snapshot) {
               if (snapshot.connectionState == ConnectionState.waiting) {
                 return Column(
@@ -867,7 +892,20 @@ class _DonorDashboardScreenState extends State<DonorDashboardScreen> with Ticker
                 );
               }
 
-              if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+              final allDocs = snapshot.data?.docs ?? [];
+              final sortedDocs = allDocs.toList();
+              sortedDocs.sort((a, b) {
+                final aData = a.data() as Map<String, dynamic>;
+                final bData = b.data() as Map<String, dynamic>;
+                final aTime = aData['createdAt'] as Timestamp?;
+                final bTime = bData['createdAt'] as Timestamp?;
+                if (aTime == null || bTime == null) return 0;
+                return bTime.compareTo(aTime);
+              });
+
+              final limitedDocs = sortedDocs.take(5).toList();
+
+              if (limitedDocs.isEmpty) {
                 return _buildEmptyState(
                   icon: '📭',
                   title: 'No activity yet',
@@ -891,13 +929,13 @@ class _DonorDashboardScreenState extends State<DonorDashboardScreen> with Ticker
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
                   padding: const EdgeInsets.symmetric(vertical: 4),
-                  itemCount: snapshot.data!.docs.length,
+                  itemCount: limitedDocs.length,
                   separatorBuilder: (_, __) => Padding(
                     padding: const EdgeInsets.only(left: 68),
                     child: Divider(height: 1, thickness: 0.5, color: _divider),
                   ),
                   itemBuilder: (context, index) {
-                    final doc = snapshot.data!.docs[index];
+                    final doc = limitedDocs[index];
                     final data = doc.data() as Map<String, dynamic>;
                     final status = data['status'] ?? 'available';
                     final timestamp = data['createdAt'] as Timestamp?;

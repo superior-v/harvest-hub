@@ -5,6 +5,7 @@ import 'package:harvest/core/constants/app_constants.dart';
 import 'package:harvest/core/services/map_service.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 class MapViewScreen extends StatefulWidget {
   const MapViewScreen({Key? key}) : super(key: key);
@@ -39,6 +40,8 @@ class _MapViewScreenState extends State<MapViewScreen> {
   final Set<Marker> _markers = {};
   bool _isLoading = true;
 
+  bool _isFarmer = false;
+
   // Default location (India center)
   static const LatLng _defaultLocation = LatLng(20.5937, 78.9629);
 
@@ -49,9 +52,23 @@ class _MapViewScreenState extends State<MapViewScreen> {
   }
 
   Future<void> _initializeMap() async {
+    await _checkUserRole();
     await _getCurrentLocation();
     await _loadDonationMarkers();
     setState(() => _isLoading = false);
+  }
+
+  Future<void> _checkUserRole() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      final doc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+      if (doc.exists) {
+        final data = doc.data() as Map<String, dynamic>;
+        if (data['role'] == 'farmer') {
+          _isFarmer = true;
+        }
+      }
+    }
   }
 
   Future<void> _getCurrentLocation() async {
@@ -85,6 +102,14 @@ class _MapViewScreenState extends State<MapViewScreen> {
         final data = doc.data();
         final lat = data['latitude'] as double?;
         final lon = data['longitude'] as double?;
+        final category = data['category'] as String? ?? 'Other';
+        final farmerCategories = ['Organic Waste', 'Manure', 'Seeds'];
+
+        if (_isFarmer) {
+          if (!farmerCategories.contains(category)) continue;
+        } else {
+          if (farmerCategories.contains(category)) continue;
+        }
 
         if (lat != null && lon != null) {
           _markers.add(
@@ -92,11 +117,11 @@ class _MapViewScreenState extends State<MapViewScreen> {
               markerId: MarkerId(doc.id),
               position: LatLng(lat, lon),
               icon: BitmapDescriptor.defaultMarkerWithHue(
-                BitmapDescriptor.hueGreen,
+                _isFarmer ? BitmapDescriptor.hueOrange : BitmapDescriptor.hueGreen,
               ),
               infoWindow: InfoWindow(
                 title: data['title'] ?? 'Donation',
-                snippet: '${data['category']} - ${data['quantity']}',
+                snippet: '$category - ${data['quantity']}',
                 onTap: () => _showDonationDetails(doc.id, data),
               ),
             ),
@@ -155,7 +180,33 @@ class _MapViewScreenState extends State<MapViewScreen> {
                 _buildDetailRow(Icons.category_rounded, 'Category', data['category']),
                 _buildDetailRow(Icons.inventory_2_rounded, 'Quantity', data['quantity']),
                 _buildDetailRow(Icons.location_on_rounded, 'Location', data['location']),
-                const SizedBox(height: 20),
+                
+                const SizedBox(height: 16),
+                const Text(
+                  'Donor Contact',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    color: _forest,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: _sprout.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: _leaf.withOpacity(0.3)),
+                  ),
+                  child: Column(
+                    children: [
+                      _buildDetailRow(Icons.person_rounded, 'Name', data['donorName']?.toString() ?? 'Anonymous'),
+                      _buildDetailRow(Icons.phone_rounded, 'Phone', data['donorPhone']?.toString() ?? 'Not provided'),
+                    ],
+                  ),
+                ),
+                
+                const SizedBox(height: 24),
                 Row(
                   children: [
                     Expanded(

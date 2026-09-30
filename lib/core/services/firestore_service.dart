@@ -112,24 +112,28 @@ class FirestoreService {
     required String condition,
     required String quantity,
     required String location,
-    double? latitude, // Add this
-    double? longitude, // Add this
+    double? latitude,
+    double? longitude,
     required List<String> imageUrls,
     DateTime? expiryDate,
+    String? donorName,
+    String? donorPhone,
   }) async {
     try {
       debugPrint('🔵 Creating donation: $title');
 
       final docRef = await donations.add({
         'donorId': donorId,
+        'donorName': donorName ?? '',
+        'donorPhone': donorPhone ?? '',
         'title': title,
         'description': description,
         'category': category,
         'condition': condition,
         'quantity': quantity,
         'location': location,
-        'latitude': latitude, // Add this
-        'longitude': longitude, // Add this
+        'latitude': latitude,
+        'longitude': longitude,
         'imageUrls': imageUrls,
         'expiryDate': expiryDate,
         'status': 'available',
@@ -370,7 +374,7 @@ class FirestoreService {
   /// Get user's requests (as recipient)
   Stream<QuerySnapshot> getUserRequests(String userId) {
     try {
-      return requests.where('recipientId', isEqualTo: userId).orderBy('createdAt', descending: true).snapshots();
+      return requests.where('recipientId', isEqualTo: userId).snapshots();
     } catch (e) {
       debugPrint('❌ Error getting user requests: $e');
       rethrow;
@@ -380,7 +384,7 @@ class FirestoreService {
   /// Get incoming requests for donor
   Stream<QuerySnapshot> getDonorIncomingRequests(String donorId) {
     try {
-      return requests.where('donorId', isEqualTo: donorId).orderBy('createdAt', descending: true).snapshots();
+      return requests.where('donorId', isEqualTo: donorId).snapshots();
     } catch (e) {
       debugPrint('❌ Error getting donor incoming requests: $e');
       rethrow;
