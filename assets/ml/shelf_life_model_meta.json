@@ -1,0 +1,31 @@
+{
+  "input_order": [
+    "category",
+    "storage_temp_c",
+    "is_airtight",
+    "elapsed_hours",
+    "vision_freshness_score"
+  ],
+  "category_map": {
+    "0": "Cooked meals",
+    "1": "Raw produce",
+    "2": "Dairy",
+    "3": "Bakery",
+    "4": "Packaged food"
+  },
+  "output": "remaining_safe_hours (float, >= 0)",
+  "guard": {
+    "tcs_categories": [
+      0,
+      2
+    ],
+    "danger_zone_c": [
+      5.0,
+      60.0
+    ],
+    "cap_hours": 2.0,
+    "cap_hours_hot": 1.0,
+    "hot_limit_c": 32.2,
+    "vision_discard_below": 0.4
+  }
+}

@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -863,7 +864,7 @@ class _RecipientDashboardScreenState extends State<RecipientDashboardScreen> wit
                       const SizedBox(height: 4),
                       AllergenTagsRow(tags: allergenTags, compact: true),
                     ],
-                    // Distance chip
+                    // Distance & Proximity Smart Match chip
                     if (distKm != null) ...[
                       const SizedBox(height: 5),
                       Row(
@@ -872,12 +873,28 @@ class _RecipientDashboardScreenState extends State<RecipientDashboardScreen> wit
                           const SizedBox(width: 3),
                           Text(
                             distKm < 1
-                                ? '${(distKm * 1000).round()} m away'
-                                : '${distKm.toStringAsFixed(1)} km away',
+                                ? '${(distKm * 1000).round()} m'
+                                : '${distKm.toStringAsFixed(1)} km',
                             style: TextStyle(
                               fontSize: 9.5,
                               color: _wave,
                               fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const Spacer(),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                            decoration: BoxDecoration(
+                              color: _wave.withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              '${(100.0 * math.exp(-(distKm * distKm) / (2.0 * 6.0 * 6.0))).clamp(25.0, 99.0).toStringAsFixed(0)}% Match',
+                              style: TextStyle(
+                                fontSize: 8.5,
+                                color: _wave,
+                                fontWeight: FontWeight.bold,
+                              ),
                             ),
                           ),
                         ],

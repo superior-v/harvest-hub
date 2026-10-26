@@ -1,0 +1,131 @@
+{
+  "module": "HarvestHub Module 4 - Proximity Matching & Priority Dispatch",
+  "data_note": "Trained on simulated scenarios; not field-validated.",
+  "model_file": "harvest_hub_dispatch_model.tflite",
+  "input_features": [
+    "distance_km",
+    "eta_mins",
+    "portions",
+    "safe_hours",
+    "category_id",
+    "hub_capacity"
+  ],
+  "input_notes": "Pass raw values as float32 [N,6]; one-hot, scaling and derived features are inside the model. eta_mins = haversine_km / 22 * 60 + 5.",
+  "output": [
+    "p_success (0-1)",
+    "match_score (0-1)"
+  ],
+  "category_map": {
+    "0": "Cooked",
+    "1": "Produce",
+    "2": "Dairy",
+    "3": "Bakery",
+    "4": "Packaged"
+  },
+  "weights": {
+    "priority_formula": "p_success * (0.5 + 0.5 * match_score)",
+    "match_score_weights": {
+      "time_slack": 0.45,
+      "capacity_fit": 0.3,
+      "proximity": 0.25
+    },
+    "escalate_if_max_priority_below": 0.35,
+    "urgency_tiers_hours": {
+      "CRITICAL": "< 2.0",
+      "URGENT": "< 3.0",
+      "STANDARD": ">= 3"
+    }
+  },
+  "simulation": {
+    "city_speed_kmh": 22.0,
+    "dispatch_buffer_min": 5.0,
+    "handoff_hours": 0.25,
+    "scenarios": 10000
+  },
+  "hubs": [
+    {
+      "name": "Central Community Kitchen",
+      "lat": 12.974,
+      "lon": 77.591,
+      "capacity": 120,
+      "accepts": [
+        "Cooked",
+        "Bakery",
+        "Packaged"
+      ]
+    },
+    {
+      "name": "Northside Food Bank",
+      "lat": 13.0185,
+      "lon": 77.599,
+      "capacity": 250,
+      "accepts": [
+        "Cooked",
+        "Produce",
+        "Dairy",
+        "Bakery",
+        "Packaged"
+      ]
+    },
+    {
+      "name": "Southgate Children's Shelter",
+      "lat": 12.933,
+      "lon": 77.605,
+      "capacity": 45,
+      "accepts": [
+        "Cooked",
+        "Dairy",
+        "Bakery"
+      ]
+    },
+    {
+      "name": "Eastview Welfare Centre",
+      "lat": 12.978,
+      "lon": 77.642,
+      "capacity": 60,
+      "accepts": [
+        "Cooked",
+        "Produce",
+        "Packaged"
+      ]
+    },
+    {
+      "name": "Westlake Relief Hub",
+      "lat": 12.965,
+      "lon": 77.54,
+      "capacity": 180,
+      "accepts": [
+        "Produce",
+        "Dairy",
+        "Bakery",
+        "Packaged"
+      ]
+    }
+  ],
+  "hard_rules": [
+    "Only hubs that accept the category are eligible (enforced outside the model).",
+    "Realised ETA + handoff must beat the Module 3 safe-hours clock."
+  ],
+  "metrics_heldout": {
+    "accuracy": 0.8101614086573734,
+    "auc": 0.8839205409137038,
+    "brier": 0.13172423839569092,
+    "tflite_kb": 18.2
+  },
+  "benchmark_heldout": {
+    "naive_success_pct": 55.666666666666664,
+    "smart_success_pct": 81.06666666666666,
+    "gain_pp": 25.4,
+    "gain_pp_ci95": [
+      22.799999999999997,
+      27.935000000000002
+    ],
+    "relative_gain_pct": 45.628742514970064,
+    "relative_gain_ci95": [
+      39.578035650132755,
+      52.006904872521766
+    ],
+    "rule_based_success_pct": 72.8,
+    "oracle_success_pct": 90.46666666666667
+  }
+}

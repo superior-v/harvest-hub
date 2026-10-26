@@ -6,6 +6,12 @@ import 'package:harvest/core/services/image_picker_service.dart';
 import 'package:harvest/core/services/storage_service.dart';
 import 'package:harvest/core/services/firestore_service.dart';
 import 'package:harvest/core/services/map_service.dart';
+import 'package:harvest/core/services/item_classifier_service.dart';
+import 'package:harvest/core/services/freshness_detector_service.dart';
+import 'package:harvest/core/services/shelf_life_predictor_service.dart';
+import 'package:harvest/core/widgets/shelf_life_countdown_widget.dart';
+import 'package:harvest/core/services/proximity_matching_service.dart';
+import 'package:harvest/core/widgets/proximity_matched_ngos_card.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 class PostDonationScreen extends StatefulWidget {
@@ -41,6 +47,18 @@ class _PostDonationScreenState extends State<PostDonationScreen> {
   final StorageService _storageService = StorageService();
   final FirestoreService _firestoreService = FirestoreService();
   final MapService _mapService = MapService();
+  final ItemClassifierService _classifierService = ItemClassifierService();
+  final FreshnessDetectorService _freshnessService = FreshnessDetectorService();
+  final ShelfLifePredictorService _shelfLifeService = ShelfLifePredictorService();
+  final ProximityMatchingService _proximityService = ProximityMatchingService();
+
+  // AI Inference State
+  bool _isAnalyzingImage = false;
+  ClassificationResult? _aiResult;
+  FreshnessResult? _freshnessResult;
+  StorageCondition _storageCondition = StorageCondition.roomTemperature;
+  ShelfLifePrediction? _shelfLifePrediction;
+  List<ProximityMatchResult> _nearbyMatches = [];
 
   // Controllers
   final _titleController = TextEditingController();
@@ -100,6 +118,57 @@ class _PostDonationScreenState extends State<PostDonationScreen> {
     'Contains Soy',
     'Contains Seafood',
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    _shelfLifeService.initialize().then((loaded) {
+      if (mounted && loaded) {
+        setState(() => _recalculateShelfLife());
+      }
+    });
+    _proximityService.initialize().then((loaded) {
+      if (mounted && loaded) {
+        setState(() => _calculateProximityMatches());
+      }
+    });
+    _recalculateShelfLife();
+    _calculateProximityMatches();
+  }
+
+  Future<void> _calculateProximityMatches() async {
+    final lat = _latitude ?? 12.9716;
+    final lon = _longitude ?? 77.5946;
+    final candidates = await _proximityService.getAvailableCandidates();
+    final matches = _proximityService.rankNearbyRecipients(
+      donorLat: lat,
+      donorLon: lon,
+      category: _selectedCategory,
+      safeRemainingHours: _shelfLifePrediction?.estimatedHoursRemaining,
+      customCandidates: candidates,
+    );
+    if (mounted) {
+      setState(() => _nearbyMatches = matches);
+    }
+  }
+
+  void _recalculateShelfLife() {
+    final prediction = _shelfLifeService.predictShelfLife(
+      category: _selectedCategory,
+      specificItemName: _aiResult?.itemName,
+      preparedAt: _cookedAt ?? DateTime.now(),
+      storage: _storageCondition,
+      isVisuallyFresh: _freshnessResult != null ? !_freshnessResult!.isSpoiled : null,
+    );
+    setState(() {
+      _shelfLifePrediction = prediction;
+      if (prediction.isPerishable) {
+        _pickupDeadline = prediction.recommendedPickupDeadline;
+        _expiryDate = prediction.safeConsumptionExpiry;
+      }
+    });
+    _calculateProximityMatches();
+  }
 
   @override
   void dispose() {
@@ -190,6 +259,7 @@ class _PostDonationScreenState extends State<PostDonationScreen> {
           _isGettingLocation = false;
         });
 
+        _calculateProximityMatches();
         _showSnackbar('📍 Location auto-filled: ${position.latitude.toStringAsFixed(4)}, ${position.longitude.toStringAsFixed(4)}');
       }
     } catch (e) {
@@ -211,8 +281,71 @@ class _PostDonationScreenState extends State<PostDonationScreen> {
     if (image != null && mounted) {
       setState(() {
         _selectedImages.add(image);
+        _isAnalyzingImage = true;
       });
       HapticFeedback.selectionClick();
+
+      // Trigger Dual-Model AI Pipeline
+      try {
+        final result = await _classifierService.classifyImage(image);
+        final freshness = await _freshnessService.analyzeFreshness(image);
+        debugPrint('Dual-AI Pipeline: ItemResult=$result, Freshness=$freshness');
+
+        if (mounted) {
+          setState(() {
+            _isAnalyzingImage = false;
+            _aiResult = result;
+            _freshnessResult = freshness;
+
+            if (result != null) {
+              if (_categories.contains(result.category)) {
+                _selectedCategory = result.category;
+              }
+              if (_titleController.text.trim().isEmpty) {
+                _titleController.text = '${result.itemName} Donation';
+              }
+            } else if (freshness != null) {
+              _selectedCategory = 'Raw Produce';
+              if (_titleController.text.trim().isEmpty) {
+                _titleController.text = '${freshness.fruitType} Donation';
+              }
+            }
+
+            // If produce and freshness check confirms status, adjust condition
+            if (freshness != null && freshness.isHighConfidence) {
+              if (freshness.isSpoiled) {
+                _selectedCondition = 'Fair';
+              } else {
+                _selectedCondition = 'Fresh / New';
+              }
+            }
+
+            // Sync dynamic shelf life
+            _recalculateShelfLife();
+          });
+
+          if (freshness != null && freshness.isHighConfidence && freshness.isSpoiled) {
+            _showSnackbar(
+              '⚠️ Safety Alert: ${freshness.statusTitle}',
+              isError: true,
+            );
+          } else if (result != null) {
+            _showSnackbar(
+              '✨ AI: Detected ${result.itemName} (${result.category})',
+            );
+          } else if (freshness != null) {
+            _showSnackbar(
+              '✨ AI: Detected ${freshness.fruitType} (${freshness.statusTitle})',
+            );
+          }
+        }
+      } catch (e, stack) {
+        debugPrint('Dual-AI Pipeline Error: $e\n$stack');
+        if (mounted) {
+          setState(() => _isAnalyzingImage = false);
+          _showSnackbar('AI Detection Error: $e', isError: true);
+        }
+      }
     }
   }
 
@@ -278,11 +411,19 @@ class _PostDonationScreenState extends State<PostDonationScreen> {
     setState(() => _isUploading = true);
 
     try {
-      final userDoc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
-      final String donorName = userDoc.data()?['name'] ?? user.displayName ?? 'Community Donor';
+      String donorName = user.displayName ?? 'Community Donor';
+      try {
+        final userDoc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .get()
+            .timeout(const Duration(seconds: 4));
+        donorName = userDoc.data()?['name'] ?? donorName;
+      } catch (_) {}
 
       List<String> imageUrls = [];
       if (_selectedImages.isNotEmpty) {
+        _showSnackbar('Compressing & uploading photos...');
         imageUrls = await _storageService.uploadMultipleImages(
           imageFiles: _selectedImages,
           folder: 'donations',
@@ -290,25 +431,27 @@ class _PostDonationScreenState extends State<PostDonationScreen> {
         );
       }
 
-      await _firestoreService.createDonation(
-        donorId: user.uid,
-        title: _titleController.text.trim(),
-        description: _descriptionController.text.trim(),
-        category: _selectedCategory,
-        condition: _selectedCondition,
-        quantity: _quantityController.text.trim(),
-        location: _locationController.text.trim(),
-        latitude: _latitude,
-        longitude: _longitude,
-        imageUrls: imageUrls,
-        expiryDate: _expiryDate,
-        donorName: donorName,
-        donorPhone: _donorPhoneController.text.trim(),
-        cookedAt: _cookedAt,
-        pickupDeadline: _pickupDeadline,
-        dietaryTags: _selectedDietaryTags.toList(),
-        allergenTags: _selectedAllergenTags.toList(),
-      );
+      await _firestoreService
+          .createDonation(
+            donorId: user.uid,
+            title: _titleController.text.trim(),
+            description: _descriptionController.text.trim(),
+            category: _selectedCategory,
+            condition: _selectedCondition,
+            quantity: _quantityController.text.trim(),
+            location: _locationController.text.trim(),
+            latitude: _latitude,
+            longitude: _longitude,
+            imageUrls: imageUrls,
+            expiryDate: _expiryDate,
+            donorName: donorName,
+            donorPhone: _donorPhoneController.text.trim(),
+            cookedAt: _cookedAt,
+            pickupDeadline: _pickupDeadline,
+            dietaryTags: _selectedDietaryTags.toList(),
+            allergenTags: _selectedAllergenTags.toList(),
+          )
+          .timeout(const Duration(seconds: 10));
 
       if (mounted) {
         setState(() => _isUploading = false);
@@ -452,7 +595,7 @@ class _PostDonationScreenState extends State<PostDonationScreen> {
     ];
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
         color: Colors.white,
         boxShadow: [
@@ -463,84 +606,92 @@ class _PostDonationScreenState extends State<PostDonationScreen> {
           ),
         ],
       ),
-      child: Column(
-        children: [
-          Row(
-            children: List.generate(steps.length * 2 - 1, (index) {
-              if (index.isOdd) {
-                final lineIndex = index ~/ 2;
-                final isCompleted = _currentStep > lineIndex;
-                return Expanded(
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 300),
-                    height: 3,
-                    color: isCompleted ? _leaf : _divider,
-                  ),
-                );
-              }
+      child: Row(
+        children: List.generate(steps.length, (stepIndex) {
+          final isCurrent = _currentStep == stepIndex;
+          final isCompleted = _currentStep > stepIndex;
+          final isLast = stepIndex == steps.length - 1;
 
-              final stepIndex = index ~/ 2;
-              final isCurrent = _currentStep == stepIndex;
-              final isCompleted = _currentStep > stepIndex;
-
-              return InkWell(
-                onTap: () {
-                  if (stepIndex < _currentStep) {
-                    _goToStep(stepIndex);
-                  } else if (stepIndex == 1 && _validateStep1()) {
-                    _goToStep(1);
-                  } else if (stepIndex == 2 && _validateStep1()) {
-                    _goToStep(2);
-                  }
-                },
-                borderRadius: BorderRadius.circular(20),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    AnimatedContainer(
-                      duration: const Duration(milliseconds: 250),
-                      width: 32,
-                      height: 32,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: isCompleted
-                            ? _leaf
-                            : isCurrent
-                                ? _forest
-                                : _mist,
-                        border: Border.all(
-                          color: isCurrent ? _leaf : _divider,
-                          width: 2,
-                        ),
-                      ),
-                      child: Center(
-                        child: isCompleted
-                            ? const Icon(Icons.check_rounded, color: Colors.white, size: 18)
-                            : Text(
-                                '${stepIndex + 1}',
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.bold,
-                                  color: isCurrent ? Colors.white : _slate,
-                                ),
+          return Expanded(
+            child: Row(
+              children: [
+                Expanded(
+                  child: InkWell(
+                    onTap: () {
+                      if (stepIndex < _currentStep) {
+                        _goToStep(stepIndex);
+                      } else if (stepIndex == 1 && _validateStep1()) {
+                        _goToStep(1);
+                      } else if (stepIndex == 2 && _validateStep1()) {
+                        _goToStep(2);
+                      }
+                    },
+                    borderRadius: BorderRadius.circular(12),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 2),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          AnimatedContainer(
+                            duration: const Duration(milliseconds: 250),
+                            width: 28,
+                            height: 28,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: isCompleted
+                                  ? _leaf
+                                  : isCurrent
+                                      ? _forest
+                                      : _mist,
+                              border: Border.all(
+                                color: isCurrent ? _leaf : _divider,
+                                width: 2,
                               ),
+                            ),
+                            child: Center(
+                              child: isCompleted
+                                  ? const Icon(Icons.check_rounded, color: Colors.white, size: 16)
+                                  : Text(
+                                      '${stepIndex + 1}',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.bold,
+                                        color: isCurrent ? Colors.white : _slate,
+                                      ),
+                                    ),
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            steps[stepIndex]['title'] as String,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: isCurrent ? FontWeight.w800 : FontWeight.w600,
+                              color: isCurrent ? _forest : (isCompleted ? _leaf : _slate),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                    const SizedBox(width: 6),
-                    Text(
-                      steps[stepIndex]['title'] as String,
-                      style: TextStyle(
-                        fontSize: 12.5,
-                        fontWeight: isCurrent ? FontWeight.w800 : FontWeight.w600,
-                        color: isCurrent ? _forest : (isCompleted ? _leaf : _slate),
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
-              );
-            }),
-          ),
-        ],
+                if (!isLast)
+                  Container(
+                    width: 16,
+                    height: 2.5,
+                    margin: const EdgeInsets.only(bottom: 18),
+                    decoration: BoxDecoration(
+                      color: _currentStep > stepIndex ? _leaf : _divider,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+              ],
+            ),
+          );
+        }),
       ),
     );
   }
@@ -618,7 +769,10 @@ class _PostDonationScreenState extends State<PostDonationScreen> {
                         color: isSelected ? Colors.white : _ink,
                         fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
                       ),
-                      onSelected: (_) => setState(() => _selectedCategory = cat),
+                      onSelected: (_) {
+                        setState(() => _selectedCategory = cat);
+                        _recalculateShelfLife();
+                      },
                     );
                   }).toList(),
                 ),
@@ -646,6 +800,19 @@ class _PostDonationScreenState extends State<PostDonationScreen> {
               ],
             ),
           ),
+
+          // Dynamic AI Shelf-Life & Expiry Prediction Card
+          if (_shelfLifePrediction != null && isFoodCategory) ...[
+            const SizedBox(height: 14),
+            ShelfLifeForecastCard(
+              prediction: _shelfLifePrediction!,
+              selectedStorage: _storageCondition,
+              onStorageChanged: (newStorage) {
+                setState(() => _storageCondition = newStorage);
+                _recalculateShelfLife();
+              },
+            ),
+          ],
 
           if (isFoodCategory) ...[
             const SizedBox(height: 18),
@@ -764,9 +931,17 @@ class _PostDonationScreenState extends State<PostDonationScreen> {
 
                 // Upload Button
                 OutlinedButton.icon(
-                  onPressed: _selectedImages.length >= 5 ? null : _pickImages,
-                  icon: const Icon(Icons.add_a_photo_rounded, size: 20),
-                  label: Text(_selectedImages.isEmpty ? 'Select Photos (Camera / Gallery)' : 'Add Another Photo'),
+                  onPressed: (_selectedImages.length >= 5 || _isAnalyzingImage) ? null : _pickImages,
+                  icon: _isAnalyzingImage
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: _forest),
+                        )
+                      : const Icon(Icons.add_a_photo_rounded, size: 20),
+                  label: Text(_isAnalyzingImage
+                      ? 'AI Analyzing Image...'
+                      : (_selectedImages.isEmpty ? 'Select Photos (Camera / Gallery)' : 'Add Another Photo')),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: _forest,
                     side: const BorderSide(color: _leaf, width: 1.5),
@@ -774,6 +949,179 @@ class _PostDonationScreenState extends State<PostDonationScreen> {
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                   ),
                 ),
+
+                // AI Detection Result Card
+                if (_aiResult != null || _freshnessResult != null) ...[
+                  const SizedBox(height: 14),
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        colors: [
+                          Color(0xFFE8F5E9),
+                          Color(0xFFF1F8E9),
+                        ],
+                      ),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: _sprout, width: 1.5),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(6),
+                              decoration: BoxDecoration(
+                                color: _leaf.withValues(alpha: 0.15),
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Icon(Icons.auto_awesome_rounded, color: _leaf, size: 18),
+                            ),
+                            const SizedBox(width: 8),
+                            const Expanded(
+                              child: Text(
+                                'AI Classification (On-Device)',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.bold,
+                                  color: _forest,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: _forest,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Text(
+                                '${((_aiResult?.confidence ?? _freshnessResult?.confidence ?? 0.0) * 100).toStringAsFixed(0)}% Confidence',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Detected Item: ${_aiResult?.itemName ?? _freshnessResult?.fruitType ?? "Food Item"}',
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w800,
+                                      fontSize: 14,
+                                      color: _ink,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    'Category: ${_aiResult?.category ?? "Raw Produce"}  •  ${(_aiResult?.isPerishable ?? true) ? "🍎 Perishable" : "📦 Non-Perishable"}',
+                                    style: const TextStyle(fontSize: 12, color: _slate),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: _divider),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.timer_outlined, size: 14, color: _leaf),
+                              const SizedBox(width: 6),
+                              Text(
+                                'Est. Shelf-Life: ${_aiResult?.estimatedShelfLife ?? "3 - 5 days"}',
+                                style: const TextStyle(
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.bold,
+                                  color: _forest,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+
+                        // Model 2: Freshness / Spoilage Inspector
+                        if (_freshnessResult != null && _freshnessResult!.isHighConfidence) ...[
+                          const SizedBox(height: 10),
+                          Container(
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: _freshnessResult!.isSpoiled
+                                  ? const Color(0xFFFEF2F2)
+                                  : const Color(0xFFF0FDF4),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(
+                                color: _freshnessResult!.isSpoiled
+                                    ? Colors.red.shade300
+                                    : Colors.green.shade300,
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  _freshnessResult!.isSpoiled
+                                      ? Icons.warning_amber_rounded
+                                      : Icons.verified_rounded,
+                                  color: _freshnessResult!.isSpoiled
+                                      ? Colors.red.shade700
+                                      : Colors.green.shade700,
+                                  size: 20,
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        _freshnessResult!.statusTitle,
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 12.5,
+                                          color: _freshnessResult!.isSpoiled
+                                              ? Colors.red.shade900
+                                              : Colors.green.shade900,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        '${_freshnessResult!.statusDescription} (${(_freshnessResult!.confidence * 100).toStringAsFixed(1)}% confidence)',
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          color: _freshnessResult!.isSpoiled
+                                              ? Colors.red.shade700
+                                              : Colors.green.shade800,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ],
 
                 const SizedBox(height: 20),
 
@@ -852,9 +1200,13 @@ class _PostDonationScreenState extends State<PostDonationScreen> {
                                 children: [
                                   Row(
                                     children: [
-                                      Text(
-                                        'Photo #${index + 1}',
-                                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                                      Flexible(
+                                        child: Text(
+                                          'Photo #${index + 1}',
+                                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
                                       ),
                                       if (isCover) ...[
                                         const SizedBox(width: 8),
@@ -1007,6 +1359,17 @@ class _PostDonationScreenState extends State<PostDonationScreen> {
             ),
           ),
 
+          // Model 4: AI Proximity Match Engine
+          if (_nearbyMatches.isNotEmpty) ...[
+            const SizedBox(height: 14),
+            ProximityMatchedNgosCard(
+              matches: _nearbyMatches,
+              onSelectRecipient: (candidate) {
+                _showSnackbar('🎯 Selected ${candidate.name} for priority dispatch');
+              },
+            ),
+          ],
+
           const SizedBox(height: 18),
 
           _buildCard(
@@ -1106,9 +1469,11 @@ class _PostDonationScreenState extends State<PostDonationScreen> {
                   _currentStep == 0
                       ? 'Next: Photos ➔'
                       : _currentStep == 1
-                          ? 'Next: Location & Time ➔'
+                          ? 'Next: Location ➔'
                           : 'Post Donation Now',
-                  style: const TextStyle(fontSize: 15.5, fontWeight: FontWeight.bold),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
                 ),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: _leaf,

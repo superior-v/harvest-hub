@@ -61,6 +61,10 @@ dependencies:
   cupertino_icons: ^1.0.8
   shared_preferences: ^2.5.3
 
+  # Machine Learning (On-Device Inference)
+  tflite_flutter: ^0.12.1
+  image: ^4.1.7
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -75,3 +79,4 @@ flutter:
   assets:
     - assets/images/
     - assets/icons/
+    - assets/ml/
